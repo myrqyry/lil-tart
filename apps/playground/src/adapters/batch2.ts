@@ -124,7 +124,13 @@ export const yolactAdapter: ModelAdapter = {
     if (!img) throw new Error('Image data not provided')
     const [_, C, H, W] = this.inputSpecs[0].shape
     const resized = resizeImageData(img, W, H)
-    const t = normalizeAndFormatImageData(resized, [1, C, H, W], { dataFormat: 'NCHW', colorOrder: 'BGR', normalization: 'imagenet' })
+    const t = normalizeAndFormatImageData(resized, [1, C, H, W], {
+      dataFormat: 'NCHW',
+      colorOrder: 'BGR',
+      normalization: 'imagenet',
+      mean: [103.94 / 255, 116.78 / 255, 123.68 / 255],
+      std: [57.38 / 255, 57.12 / 255, 58.40 / 255],
+    })
     return { input: t }
   },
   parseOutputs(o: Record<string, Tensor>) { return Promise.resolve({ loc: o.loc, conf: o.conf, mask: o.mask, proto: o.proto }) },

@@ -1,6 +1,6 @@
 import { Tensor } from '@litertjs/core'
 import type { ModelAdapter, TensorSpec } from './types'
-import { flatten } from './util'
+import { normalizeAndFormatImageData, resizeImageData } from '../imageUtils'
 
 const INPUT_SPECS: TensorSpec[] = [
   {
@@ -8,7 +8,6 @@ const INPUT_SPECS: TensorSpec[] = [
     dtype: 'float32',
     shape: [1, 3, 256, 256],
     description: 'Noisy image (NCHW, 256x256, RGB, 0-1)',
-    constraints: { min: 0, max: 1 },
   },
 ]
 
@@ -34,9 +33,11 @@ export const nafnetAdapter: ModelAdapter = {
 
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const spec = INPUT_SPECS[0]
-    const raw = values[spec.name] ?? 0.5
-    const data = flatten(raw)
-    return { [spec.name]: new Tensor(data, spec.shape) }
+    const img = values['image'] as ImageData
+    if (!img) throw new Error('Image data not provided for nafnet')
+    const [, C, H, W] = spec.shape
+    const resized = resizeImageData(img, W, H)
+    return { [spec.name]: normalizeAndFormatImageData(resized, [1, C, H, W], { dataFormat: 'NCHW', colorOrder: 'RGB', normalization: '0-1' }) }
   },
 
   async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {

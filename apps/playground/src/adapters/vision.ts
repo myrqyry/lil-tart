@@ -62,6 +62,20 @@ function buildNhwcRawTensor(imageData: ImageData, w: number, h: number, bgr = fa
   return new Tensor(data, [1, h, w, 3])
 }
 
+function letterbox(imageData: ImageData, size: number, pad = 114): ImageData {
+  const scale = Math.min(size / imageData.width, size / imageData.height)
+  const w = Math.max(1, Math.round(imageData.width * scale))
+  const h = Math.max(1, Math.round(imageData.height * scale))
+  const src = new OffscreenCanvas(imageData.width, imageData.height)
+  src.getContext('2d')!.putImageData(imageData, 0, 0)
+  const dst = new OffscreenCanvas(size, size)
+  const ctx = dst.getContext('2d')!
+  ctx.fillStyle = `rgb(${pad},${pad},${pad})`
+  ctx.fillRect(0, 0, size, size)
+  ctx.drawImage(src, Math.round((size - w) / 2), Math.round((size - h) / 2), w, h)
+  return ctx.getImageData(0, 0, size, size)
+}
+
 export const headpose6drepnetAdapter: ModelAdapter = {
   modelId: '6drepnet',
   metadata: { name: '6DRepNet — Head Pose', description: '6D head pose estimation (Euler angles)', modelPath: 'https://huggingface.co/litert-community/6DRepNet-HeadPose-LiteRT/resolve/main/6drepnet.tflite', tags: ['vision', 'pose'] },
@@ -116,8 +130,8 @@ export const yoloxAdapter: ModelAdapter = {
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const imageData = values['image'] as ImageData
     if (!imageData) throw new Error('Image data not provided for yolox')
-    const resized = resizeImageData(imageData, 640, 640)
-    return { images: buildNhwcRawTensor(resized, 640, 640, true) }
+    const padded = letterbox(imageData, 640)
+    return { images: buildNhwcRawTensor(padded, 640, 640, true) }
   },
   async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
     const t = outputs['output']
