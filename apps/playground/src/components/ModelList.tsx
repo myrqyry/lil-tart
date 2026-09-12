@@ -1,4 +1,4 @@
-import type { ModelAdapter } from '../adapters/types'
+import type { ModelAdapter, VerificationStatus } from '../adapters/types'
 
 interface ModelListProps {
   adapters: ModelAdapter[]
@@ -8,6 +8,14 @@ interface ModelListProps {
   downloadProgress?: { loadedBytes: number; totalBytes?: number } | null
   selectedModelId?: string | null
   isModelLoaded?: boolean
+}
+
+const VERIFICATION_LABELS: Record<VerificationStatus, string> = {
+  registered: 'Registered',
+  'compile-verified': 'Compile verified',
+  'inference-verified': 'Inference verified',
+  'output-verified': 'Output verified',
+  'manually-verified': 'Manually verified',
 }
 
 function formatBytes(bytes: number): string {
@@ -30,6 +38,7 @@ export default function ModelList({ adapters, onSelect, disabled, loadingModelId
         const isLoading = loadingModelId === a.modelId && !!disabled
         const isSelectedLoaded = selectedModelId === a.modelId && isModelLoaded
         const isUnavailable = !!a.disabled
+        const verificationStatus = a.verification?.status ?? 'registered'
         return (
           <button
             key={a.modelId}
@@ -42,6 +51,16 @@ export default function ModelList({ adapters, onSelect, disabled, loadingModelId
               <div className="flex-1">
                 <p className="text-sm font-semibold text-on-surface">{a.metadata.name}</p>
                 <p className="mt-1 line-clamp-2 text-xs text-on-surface-variant">{a.metadata.description}</p>
+                <div className="mt-2 flex flex-wrap items-center gap-1">
+                  <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
+                    Evidence: {VERIFICATION_LABELS[verificationStatus]}
+                  </span>
+                  {a.verification?.backends?.map(backend => (
+                    <span key={backend} className="rounded-full bg-secondary-container px-2 py-0.5 text-[10px] font-medium text-on-secondary-container">
+                      {backend.toUpperCase()}
+                    </span>
+                  ))}
+                </div>
                 {a.metadata.tags.length > 0 && (
                   <p className="mt-2 text-[10px] font-medium uppercase tracking-wide text-on-surface-variant">Task types</p>
                 )}
