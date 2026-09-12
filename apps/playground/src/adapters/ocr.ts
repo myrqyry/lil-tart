@@ -152,7 +152,7 @@ export const ppOcrAdapter: ModelAdapter = {
   inputSpecs: [
     { name: 'image', dtype: 'float32', shape: [1, 3, DET_SIZE, DET_SIZE], description: 'Image containing text' },
   ],
-  outputSpecs: [{ name: 'text', dtype: 'float32', shape: [], description: 'Recognized text lines' }],
+  outputSpecs: [{ name: 'text', dtype: 'string', shape: [], description: 'Recognized text lines' }],
   prepareInputs() {
     throw new Error('Image data not provided for pp-ocrv5')
   },
