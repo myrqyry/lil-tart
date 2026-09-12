@@ -9,10 +9,12 @@ import { sam2Adapters } from './sam2'
 import { adapters13 } from './batch2'
 import { audioAdapters } from './audio'
 import { textAdapters } from './text'
+import { ocrAdapters } from './ocr'
 
 export const registeredAdapters: ModelAdapter[] = [
   ...audioAdapters,
   ...textAdapters,
+  ...ocrAdapters,
   ...magentaAdapters,
   ...musicCocaAdapters,
   realesrganAdapter,
