@@ -5,6 +5,9 @@ import { BYTE_TO_UNICODE } from './clipTokenizer'
 
 const BYTE_LEVEL_REGEX = /'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+/gu
 
+const UNICODE_TO_BYTE = new Map<string, number>()
+BYTE_TO_UNICODE.forEach((ch, byte) => UNICODE_TO_BYTE.set(ch, byte))
+
 export interface HfTokenizerJson {
   normalizer?: HfNode | null
   pre_tokenizer?: HfNode | null
@@ -62,6 +65,33 @@ export class HfTokenizer {
   /** Inverse lookup for skiplist filtering; falls back to the added-token content. */
   tokenOf(id: number): string | undefined {
     return this.inverse.get(id) ?? [...this.added.entries()].find(([, value]) => value === id)?.[0]
+  }
+
+  /** Decode ids back to text (inverse of the ByteLevel mapping when active). Specials are dropped. */
+  decode(ids: number[]): string {
+    const addedIds = new Set(this.added.values())
+    let out = ''
+    const bytes: number[] = []
+    const flush = () => {
+      if (!bytes.length) return
+      out += new TextDecoder().decode(Uint8Array.from(bytes))
+      bytes.length = 0
+    }
+    for (const id of ids) {
+      if (addedIds.has(id)) continue
+      const token = this.tokenOf(id)
+      if (!token) continue
+      if (this.byteLevel) {
+        for (const ch of token) {
+          const byte = UNICODE_TO_BYTE.get(ch)
+          if (byte !== undefined) bytes.push(byte)
+        }
+      } else {
+        out += token.replace(/[Ġ▁]/g, ' ')
+      }
+    }
+    flush()
+    return out
   }
 
   private normalize(text: string): string {

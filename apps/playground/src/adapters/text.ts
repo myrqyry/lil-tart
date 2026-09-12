@@ -684,6 +684,87 @@ export const promptRouterAdapter: ModelAdapter = {
   },
 }
 
+const GEC_BASE = 'https://huggingface.co/litert-community/LFM2.5-Encoder-350M-Spellchecker/resolve/main'
+const GEC_SEQ_LEN = 128
+const GEC_VOCAB = 64400
+const GEC_TAG_WIDTH = 128802
+const GEC_MIN_ERROR_PROB = 0.5
+const GEC_MAX_PASSES = 3
+
+export const spellcheckerAdapter: ModelAdapter = {
+  modelId: 'lfm2.5-spellchecker',
+  metadata: {
+    name: 'LFM2.5-Encoder-350M-Spellchecker',
+    description: 'GECToR-style tagger that corrects spelling and grammar token by token, iterating up to 3 passes.',
+    modelPath: `${GEC_BASE}/LFM2.5-Encoder-350M-Spellchecker_wi8fc.tflite`,
+    tags: ['text', 'grammar', 'spellcheck'],
+  },
+  inputSpecs: [{ name: 'text', dtype: 'string', shape: [], description: 'Text to correct', constraints: { text: true } }],
+  outputSpecs: [{ name: 'corrected', dtype: 'float32', shape: [], description: 'Corrected text' }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const text = String(values['text'] ?? '').trim()
+    if (!text) throw new Error('Provide text to correct')
+
+    const tokenizer = await loadHfTokenizer(`${GEC_BASE}/tokenizer.json`)
+    let ids = tokenizer.encode(text)
+    if (ids.length > GEC_SEQ_LEN) throw new Error('Text exceeds the 128-token window')
+
+    for (let pass = 0; pass < GEC_MAX_PASSES; pass++) {
+      const inputIds = new Int32Array(GEC_SEQ_LEN)
+      inputIds.set(ids)
+      const mask = new Int32Array(GEC_SEQ_LEN)
+      for (let i = 0; i < ids.length; i++) mask[i] = 1
+
+      const result = await ctx.predict(
+        'main',
+        {
+          input_ids: ctx.createTensor(inputIds, [1, GEC_SEQ_LEN]),
+          attention_mask: ctx.createTensor(mask, [1, GEC_SEQ_LEN]),
+        },
+        'gec_128',
+      )
+      const labelLogits = (await Object.values(result)[0].data()) as Float32Array
+      const detectLogits = (await Object.values(result)[1].data()) as Float32Array
+
+      const edits: [number, number][] = []
+      for (let t = 0; t < ids.length; t++) {
+        const d0 = detectLogits[t * 2]
+        const d1 = detectLogits[t * 2 + 1]
+        const max = Math.max(d0, d1)
+        const errorProb = Math.exp(d1 - max) / (Math.exp(d0 - max) + Math.exp(d1 - max))
+        if (errorProb < GEC_MIN_ERROR_PROB) continue
+
+        let tag = 0
+        let best = -Infinity
+        for (let k = 0; k < GEC_TAG_WIDTH; k++) {
+          const v = labelLogits[t * GEC_TAG_WIDTH + k]
+          if (v > best) {
+            best = v
+            tag = k
+          }
+        }
+        if (tag === 0) continue
+        edits.push([t, tag])
+      }
+      if (!edits.length) break
+
+      for (let e = edits.length - 1; e >= 0; e--) {
+        const [t, tag] = edits[e]
+        if (tag === 1) ids.splice(t, 1)
+        else if (tag < 2 + GEC_VOCAB) ids[t] = tag - 2
+        else ids.splice(t + 1, 0, tag - 2 - GEC_VOCAB)
+      }
+    }
+    return { corrected: tokenizer.decode(ids).trim() }
+  },
+}
+
 export const textAdapters: ModelAdapter[] = [
   mxbaiColbertAdapter,
   mlateonAdapter,
@@ -700,4 +781,5 @@ export const textAdapters: ModelAdapter[] = [
   piiDetectorAdapter,
   policyLinterAdapter,
   promptRouterAdapter,
+  spellcheckerAdapter,
 ]
