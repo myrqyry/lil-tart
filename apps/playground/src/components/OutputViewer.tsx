@@ -32,7 +32,7 @@ export default function OutputViewer({ outputs, outputTensors, outputSpecs }: Ou
               <ImageOutput data={raw.data} shape={shape} label={key} />
             ) : (
               <pre className="max-h-48 overflow-auto rounded-lg bg-surface-container px-4 py-3 font-mono text-xs text-on-surface [scrollbar-width:thin]">
-                {JSON.stringify(value, null, 2)}
+                {typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
               </pre>
             )}
           </div>

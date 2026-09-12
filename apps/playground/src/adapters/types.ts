@@ -26,8 +26,12 @@ export interface ModelGraph {
 
 /** Passed to `ModelAdapter.run`; routes each graph through the same loaded runtime. */
 export interface InferenceContext {
-  predict(graph: string, inputs: Record<string, import('@litertjs/core').Tensor>): Promise<Record<string, import('@litertjs/core').Tensor>>
-  createTensor(data: Float32Array, shape: number[]): import('@litertjs/core').Tensor
+  predict(
+    graph: string,
+    inputs: Record<string, import('@litertjs/core').Tensor> | import('@litertjs/core').Tensor[],
+    signature?: string,
+  ): Promise<Record<string, import('@litertjs/core').Tensor>>
+  createTensor(data: Float32Array | Int32Array, shape: number[]): import('@litertjs/core').Tensor
 }
 
 export interface ModelAdapter {

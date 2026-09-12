@@ -179,16 +179,15 @@ export function useModelRunner(): UseModelRunnerReturn {
       let parsed: Record<string, unknown>
       if (adapter.run) {
         const ctx: InferenceContext = {
-          predict: async (graph, inputs) => {
+          predict: async (graph, inputs, signature) => {
             const graphPath = graph === 'main'
               ? adapter.metadata.modelPath
               : adapter.graphs?.find((entry) => entry.name === graph)?.modelPath
             if (!graphPath) throw new Error(`Unknown graph '${graph}' for ${adapter.modelId}`)
-            const result = await runtime.liteRt.predict(graphPath, inputs, {
-              accelerator,
-              label: `playground:${adapter.modelId}:${graph}`,
-              webNNOptions,
-            })
+            const options = { accelerator, label: `playground:${adapter.modelId}:${graph}`, webNNOptions }
+            const result = signature
+              ? await runtime.liteRt.predictWithSignature(graphPath, signature, inputs, options)
+              : await runtime.liteRt.predict(graphPath, inputs, options)
             return normalizeOutputs(result, [])
           },
           createTensor: (data, shape) => runtime.liteRt.createTensor(data, shape),

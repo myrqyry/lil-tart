@@ -5,6 +5,7 @@ import type { ModelAdapter, TensorSpec } from '../adapters/types'
 import ModelList from './ModelList'
 import InputEditor from './InputEditor'
 import ImageInput from './ImageInput'
+import AudioInput from './AudioInput'
 import OutputViewer from './OutputViewer'
 
 function isVisionSpec(spec: TensorSpec): boolean {
@@ -13,6 +14,11 @@ function isVisionSpec(spec: TensorSpec): boolean {
   if (s[2] > 4 && s[3] > 4) return true
   if (s[1] > 4 && s[2] > 4 && s[3] >= 1 && s[3] <= 4) return true
   return false
+}
+
+function isAudioSpec(spec: TensorSpec): boolean {
+  const s = spec.shape
+  return s.length === 2 && s[0] === 1 && s[1] > 256
 }
 
 interface ModelRunnerProps {
@@ -230,6 +236,8 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
 
             {selectedAdapter.inputSpecs.some(isVisionSpec) ? (
               <ImageInput specs={selectedAdapter.inputSpecs} onChange={setInputValues} />
+            ) : selectedAdapter.inputSpecs.some(isAudioSpec) ? (
+              <AudioInput specs={selectedAdapter.inputSpecs} onChange={setInputValues} />
             ) : (
               <InputEditor specs={selectedAdapter.inputSpecs} onChange={setInputValues} />
             )}
