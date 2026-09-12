@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useModelRunner } from '../hooks/useModelRunner'
 import type { Accelerator } from '../hooks/useModelRunner'
 import type { ModelAdapter, TensorSpec } from '../adapters/types'
@@ -77,6 +77,11 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const [search, setSearch] = useState('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [modelBaseInput, setModelBaseInput] = useState(modelBase)
+
+  // ponytail: merge so image + text + scalar widgets can coexist on one adapter (e.g. CLIPSeg).
+  const mergeInput = useCallback((values: Record<string, unknown>) => {
+    setInputValues(prev => ({ ...prev, ...values }))
+  }, [])
 
   const handleSelect = async (adapter: ModelAdapter) => {
     if (onSelect && adapter.isPipeline) {
@@ -234,12 +239,17 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
               )}
             </section>
 
-            {selectedAdapter.inputSpecs.some(isVisionSpec) ? (
-              <ImageInput specs={selectedAdapter.inputSpecs} onChange={setInputValues} />
-            ) : selectedAdapter.inputSpecs.some(isAudioSpec) ? (
-              <AudioInput specs={selectedAdapter.inputSpecs} onChange={setInputValues} />
-            ) : (
-              <InputEditor specs={selectedAdapter.inputSpecs} onChange={setInputValues} />
+            {selectedAdapter.inputSpecs.some(isVisionSpec) && (
+              <ImageInput specs={selectedAdapter.inputSpecs} onChange={mergeInput} />
+            )}
+            {selectedAdapter.inputSpecs.some(isAudioSpec) && (
+              <AudioInput specs={selectedAdapter.inputSpecs} onChange={mergeInput} />
+            )}
+            {selectedAdapter.inputSpecs.some(spec => !isVisionSpec(spec) && !isAudioSpec(spec)) && (
+              <InputEditor
+                specs={selectedAdapter.inputSpecs.filter(spec => !isVisionSpec(spec) && !isAudioSpec(spec))}
+                onChange={mergeInput}
+              />
             )}
 
             <button

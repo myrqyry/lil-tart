@@ -28,7 +28,9 @@ export default function OutputViewer({ outputs, outputTensors, outputSpecs }: Ou
         return (
           <div key={key} className="mb-4">
             <div className="mb-1 text-sm font-semibold text-on-surface">{key}</div>
-            {raw && isImageShape(shape) ? (
+            {typeof ImageData !== 'undefined' && value instanceof ImageData ? (
+              <ImageOutput data={value.data} shape={[1, value.height, value.width]} label={key} />
+            ) : raw && isImageShape(shape) ? (
               <ImageOutput data={raw.data} shape={shape} label={key} />
             ) : (
               <pre className="max-h-48 overflow-auto rounded-lg bg-surface-container px-4 py-3 font-mono text-xs text-on-surface [scrollbar-width:thin]">

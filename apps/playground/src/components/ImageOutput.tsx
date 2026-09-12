@@ -1,12 +1,12 @@
 import { useRef, useEffect } from 'react'
 
 interface ImageOutputProps {
-  data: Float32Array | Uint8Array | Int32Array
+  data: Float32Array | Uint8Array | Uint8ClampedArray | Int32Array
   shape: number[]
   label: string
 }
 
-function tensorToImageData(data: Float32Array | Uint8Array | Int32Array, shape: number[]): ImageData | null {
+function tensorToImageData(data: Float32Array | Uint8Array | Uint8ClampedArray | Int32Array, shape: number[]): ImageData | null {
   if (shape.length === 4) {
     const [, c, h, w] = shape
     // NCHW format

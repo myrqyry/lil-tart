@@ -245,61 +245,44 @@ export const yolov8SegAdapter: ModelAdapter = {
   parseOutputs(o: Record<string, Tensor>) { return Promise.resolve({ output: o.output }) },
 }
 
-export const clipsegAdapters: ModelAdapter[] = [
-  {
-    modelId: 'clipseg-text',
-    metadata: { name: 'CLIPSeg — Text Encoder', description: 'Text encoder for text-prompted segmentation', modelPath: 'https://huggingface.co/litert-community/CLIPSeg-rd64-LiteRT/resolve/main/clipseg_text_fp16.tflite', tags: ['vision', 'segmentation'] },
-    inputSpecs: [{ name: 'text', dtype: 'string', shape: [], description: 'Text prompt, e.g. "a dog"', constraints: { text: true } }],
-    outputSpecs: [s('text_emb', 'float32', [1, 64], 'Text embedding')],
-    prepareInputs(): Record<string, Tensor> {
-      throw new Error('clipseg-text tokenizes inside run()')
-    },
-    async run(values, ctx) {
-      const tokenizer = await loadClipTokenizer()
-      const ids = tokenizer.encode(String(values['text'] ?? ''), 77)
-      const result = await ctx.predict('main', { input: ctx.createTensor(Float32Array.from(ids), [1, 77]) })
-      const embedding = Object.values(result)[0]
-      const data = await embedding.data()
-      return { text_emb: Array.from(data as Float32Array) }
-    },
-    parseOutputs(o: Record<string, Tensor>) { return Promise.resolve({ text_emb: o.text_emb }) },
+const CLIPSEG_BASE = 'https://huggingface.co/litert-community/CLIPSeg-rd64-LiteRT/resolve/main'
+
+export const clipsegAdapter: ModelAdapter = {
+  modelId: 'clipseg',
+  metadata: { name: 'CLIPSeg — Text-Prompted Seg', description: 'Segment an image from a free-text prompt (text + vision encoders → decoder)', modelPath: `${CLIPSEG_BASE}/clipseg_text_fp16.tflite`, tags: ['vision', 'segmentation', 'text'] },
+  graphs: [
+    { name: 'vision', modelPath: `${CLIPSEG_BASE}/clipseg_vision_fp16.tflite` },
+    { name: 'decoder', modelPath: `${CLIPSEG_BASE}/clipseg_decoder.tflite` },
+  ],
+  inputSpecs: [
+    s('image', 'float32', [1, 3, 352, 352], 'RGB x/255 NCHW'),
+    { name: 'text', dtype: 'string', shape: [], description: 'Text prompt, e.g. "a dog"', constraints: { text: true } },
+  ],
+  outputSpecs: [s('mask', 'float32', [1, 1, 352, 352], 'Segmentation mask (min-max normalized for display)')],
+  prepareInputs(): Record<string, Tensor> {
+    throw new Error('Image data not provided for clipseg')
   },
-  {
-    modelId: 'clipseg-vision',
-    metadata: { name: 'CLIPSeg — Vision Encoder', description: 'Vision encoder for text-prompted segmentation', modelPath: 'https://huggingface.co/litert-community/CLIPSeg-rd64-LiteRT/resolve/main/clipseg_vision_fp16.tflite', tags: ['vision', 'segmentation'] },
-    inputSpecs: [s('input', 'float32', [1, 3, 352, 352], 'RGB x/255 NCHW')],
-    outputSpecs: [s('vision_emb', 'float32', [1, 64], 'Visual embedding')],
-    prepareInputs(values: Record<string, any>): Record<string, Tensor> {
-      const img = values['image'] as ImageData
-      if (!img) throw new Error('Image data not provided for clipseg-vision')
-      const [_, C, H, W] = this.inputSpecs[0].shape
-      const resized = resizeImageData(img, W, H)
-      const t = normalizeAndFormatImageData(resized, [1, C, H, W], { dataFormat: 'NCHW', colorOrder: 'RGB', normalization: '0-1' })
-      return { input: t }
-    },
-    parseOutputs(o: Record<string, Tensor>) { return Promise.resolve({ vision_emb: o.vision_emb }) },
+  async run(values, ctx) {
+    const image = values['image'] as ImageData | undefined
+    if (!image) throw new Error('Image data not provided for clipseg')
+    const tokenizer = await loadClipTokenizer()
+    const ids = tokenizer.encode(String(values['text'] ?? ''), 77)
+    const textOut = await ctx.predict('main', { input: ctx.createTensor(Float32Array.from(ids), [1, 77]) })
+    const textEmb = Object.values(textOut)[0]
+
+    const resized = resizeImageData(image, 352, 352)
+    const visionTensor = normalizeAndFormatImageData(resized, [1, 3, 352, 352], { dataFormat: 'NCHW', colorOrder: 'RGB', normalization: '0-1' })
+    const visionOut = await ctx.predict('vision', { input: visionTensor })
+    const visionEmb = Object.values(visionOut)[0]
+
+    const decOut = await ctx.predict('decoder', { text_emb: textEmb, vision_emb: visionEmb })
+    const mask = await tensorToImageData(Object.values(decOut)[0], 352, 352)
+    return { mask }
   },
-  {
-    modelId: 'clipseg-decoder',
-    metadata: { name: 'CLIPSeg — Decoder', description: 'Decoder for text-prompted segmentation', modelPath: 'https://huggingface.co/litert-community/CLIPSeg-rd64-LiteRT/resolve/main/clipseg_decoder.tflite', tags: ['vision', 'segmentation'] },
-    inputSpecs: [
-      s('text_emb', 'float32', [1, 64], 'From CLIPSeg text encoder'),
-      s('vision_emb', 'float32', [1, 64], 'From CLIPSeg vision encoder'),
-    ],
-    outputSpecs: [s('mask', 'float32', [1, 1, 352, 352], 'Segmentation mask')],
-    isPipeline: true as const,
-    prepareInputs(values: Record<string, any>): Record<string, Tensor> {
-      const textEmb = values['text_emb'] as Tensor
-      const visionEmb = values['vision_emb'] as Tensor
-      if (!textEmb || !visionEmb) throw new Error('Both text_emb and vision_emb required for clipseg-decoder')
-      return { text_emb: textEmb, vision_emb: visionEmb }
-    },
-    parseOutputs(o: Record<string, Tensor>) {
-      const [_, _c, H, W] = this.outputSpecs[0].shape
-      return tensorToImageData(o.mask, W, H).then(d => ({ mask: d }))
-    },
-  },
-]
+  parseOutputs(o: Record<string, Tensor>) { return Promise.resolve(o) },
+}
+
+export const clipsegAdapters: ModelAdapter[] = [clipsegAdapter]
 
 export const adapters13: ModelAdapter[] = [
   depth3Adapter, rtmposeFaceAdapter, rtmposeHandAdapter, rtmposeSAdapter, rtmwAdapter,
