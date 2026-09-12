@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeDeltas, decodeSentencePiece, fft, logMelSpectrogram, makeCausalMask, melFilterbank, melSpectrogram, resampleToMono, windowsOf } from './audioUtils'
+import { computeDeltas, decodeSentencePiece, encodeWav, fft, logMelSpectrogram, makeCausalMask, melFilterbank, melSpectrogram, resampleToMono, windowsOf } from './audioUtils'
 
 describe('resampleToMono', () => {
   it('downmixes stereo to mono at the same rate', () => {
@@ -98,5 +98,21 @@ describe('computeDeltas', () => {
   it('matches torchaudio on a linear ramp (replicate edges)', () => {
     const deltas = computeDeltas(new Float32Array([0, 1, 2, 3, 4]), 1, 5, 3)
     expect(Array.from(deltas)).toEqual([0.5, 1, 1, 1, 0.5])
+  })
+})
+
+describe('encodeWav', () => {
+  it('writes a 16-bit mono RIFF header and clamps samples', () => {
+    const wav = encodeWav(new Float32Array([0, 1, -2, 0.5]), 22050)
+    const v = new DataView(wav)
+    const tag = (off: number) => String.fromCharCode(v.getUint8(off), v.getUint8(off + 1), v.getUint8(off + 2), v.getUint8(off + 3))
+    expect(tag(0)).toBe('RIFF')
+    expect(tag(8)).toBe('WAVE')
+    expect(v.getUint16(22, true)).toBe(1)
+    expect(v.getUint32(24, true)).toBe(22050)
+    expect(v.getUint32(40, true)).toBe(8)
+    expect(v.getInt16(44, true)).toBe(0)
+    expect(v.getInt16(46, true)).toBe(0x7fff)
+    expect(v.getInt16(48, true)).toBe(-0x8000)
   })
 })

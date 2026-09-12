@@ -1,4 +1,5 @@
 import ImageOutput, { isImageShape } from './ImageOutput'
+import AudioOutput from './AudioOutput'
 import type { TensorSpec } from '../adapters/types'
 import type { RawTensor } from '../hooks/useModelRunner'
 
@@ -28,7 +29,9 @@ export default function OutputViewer({ outputs, outputTensors, outputSpecs }: Ou
         return (
           <div key={key} className="mb-4">
             <div className="mb-1 text-sm font-semibold text-on-surface">{key}</div>
-            {typeof ImageData !== 'undefined' && value instanceof ImageData ? (
+            {value && typeof value === 'object' && value.samples instanceof Float32Array ? (
+              <AudioOutput samples={value.samples} sampleRate={value.sampleRate} label={key} />
+            ) : typeof ImageData !== 'undefined' && value instanceof ImageData ? (
               <ImageOutput data={value.data} shape={[1, value.height, value.width]} label={key} />
             ) : raw && isImageShape(shape) ? (
               <ImageOutput data={raw.data} shape={shape} label={key} />

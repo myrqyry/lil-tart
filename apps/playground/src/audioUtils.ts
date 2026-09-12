@@ -57,6 +57,29 @@ export function windowsOf(audio: Float32Array, size: number): Float32Array[] {
   return windows
 }
 
+/** 16-bit mono PCM WAV container for playback of generated audio. */
+export function encodeWav(samples: Float32Array, sampleRate: number): ArrayBuffer {
+  const bitsPerSample = 16
+  const byteRate = (sampleRate * bitsPerSample) / 8
+  const dataSize = samples.length * 2
+  const buf = new ArrayBuffer(44 + dataSize)
+  const v = new DataView(buf)
+  const w = (off: number, str: string) => {
+    for (let i = 0; i < str.length; i++) v.setUint8(off + i, str.charCodeAt(i))
+  }
+  w(0, 'RIFF'); v.setUint32(4, 36 + dataSize, true); w(8, 'WAVE')
+  w(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true)
+  v.setUint16(22, 1, true); v.setUint32(24, sampleRate, true)
+  v.setUint32(28, byteRate, true); v.setUint16(32, 2, true)
+  v.setUint16(34, bitsPerSample, true)
+  w(36, 'data'); v.setUint32(40, dataSize, true)
+  for (let i = 0; i < samples.length; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]))
+    v.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true)
+  }
+  return buf
+}
+
 /** In-place iterative radix-2 FFT; `re`/`im` must share a power-of-two length. */
 export function fft(re: Float32Array, im: Float32Array): void {
   const n = re.length

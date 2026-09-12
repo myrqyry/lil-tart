@@ -10,9 +10,11 @@ import { adapters13 } from './batch2'
 import { audioAdapters } from './audio'
 import { textAdapters } from './text'
 import { ocrAdapters } from './ocr'
+import { ttsAdapters } from './tts'
 
 export const registeredAdapters: ModelAdapter[] = [
   ...audioAdapters,
+  ...ttsAdapters,
   ...textAdapters,
   ...ocrAdapters,
   ...magentaAdapters,
