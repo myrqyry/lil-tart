@@ -1,6 +1,7 @@
 import type { ModelAdapter } from './types'
 import { Tensor } from '@litertjs/core'
 import { resizeImageData, normalizeAndFormatImageData, tensorToImageData } from '../imageUtils'
+import { loadClipTokenizer } from '../clipTokenizer'
 
 const s = (n: string, d: 'float32' | 'int32', sh: number[], desc: string) =>
   ({ name: n, dtype: d, shape: sh, description: desc })
@@ -248,13 +249,18 @@ export const clipsegAdapters: ModelAdapter[] = [
   {
     modelId: 'clipseg-text',
     metadata: { name: 'CLIPSeg — Text Encoder', description: 'Text encoder for text-prompted segmentation', modelPath: 'https://huggingface.co/litert-community/CLIPSeg-rd64-LiteRT/resolve/main/clipseg_text_fp16.tflite', tags: ['vision', 'segmentation'] },
-    inputSpecs: [s('input', 'float32', [1, 77], 'Text tokens')],
+    inputSpecs: [{ name: 'text', dtype: 'string', shape: [], description: 'Text prompt, e.g. "a dog"', constraints: { text: true } }],
     outputSpecs: [s('text_emb', 'float32', [1, 64], 'Text embedding')],
-    prepareInputs(values: Record<string, any>): Record<string, Tensor> {
-      const tokens = values['input'] as Float32Array | Int32Array
-      if (!tokens) throw new Error('Text tokens not provided for clipseg-text')
-      const [N, L] = this.inputSpecs[0].shape
-      return { input: new Tensor(new Float32Array(tokens), [N, L]) }
+    prepareInputs(): Record<string, Tensor> {
+      throw new Error('clipseg-text tokenizes inside run()')
+    },
+    async run(values, ctx) {
+      const tokenizer = await loadClipTokenizer()
+      const ids = tokenizer.encode(String(values['text'] ?? ''), 77)
+      const result = await ctx.predict('main', { input: ctx.createTensor(Float32Array.from(ids), [1, 77]) })
+      const embedding = Object.values(result)[0]
+      const data = await embedding.data()
+      return { text_emb: Array.from(data as Float32Array) }
     },
     parseOutputs(o: Record<string, Tensor>) { return Promise.resolve({ text_emb: o.text_emb }) },
   },

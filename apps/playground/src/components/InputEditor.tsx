@@ -9,7 +9,9 @@ interface InputEditorProps {
 function defaultValues(specs: TensorSpec[]): Record<string, any> {
   const v: Record<string, any> = {}
   for (const spec of specs) {
-    if (spec.constraints?.enum) {
+    if (spec.dtype === 'string') {
+      v[spec.name] = ''
+    } else if (spec.constraints?.enum) {
       v[spec.name] = spec.constraints.enum[0]
     } else {
       v[spec.name] = 0
@@ -24,8 +26,12 @@ export default function InputEditor({ specs, onChange }: InputEditorProps) {
   useEffect(() => { onChange(values) }, [values, onChange])
 
   const set = (name: string, raw: string) => {
-    let val: any = raw
     const spec = specs.find(s => s.name === name)
+    if (spec?.dtype === 'string') {
+      setValues(prev => ({ ...prev, [name]: raw }))
+      return
+    }
+    let val: any = raw
     const isArray = spec && (spec.shape.length > 1 || spec.shape[0] > 1)
     if (isArray) {
       try {
@@ -55,7 +61,15 @@ export default function InputEditor({ specs, onChange }: InputEditorProps) {
             </span>
           </label>
           <p className="mb-1 text-xs text-on-surface-variant">{spec.description}</p>
-          {spec.constraints?.enum ? (
+          {spec.dtype === 'string' ? (
+            <textarea
+              value={String(values[spec.name] ?? '')}
+              onChange={e => set(spec.name, e.target.value)}
+              rows={2}
+              placeholder={spec.description}
+              className="w-full rounded-lg border border-outline bg-surface-container px-3 py-2 text-sm text-on-surface transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
+            />
+          ) : spec.constraints?.enum ? (
             <select
               value={String(values[spec.name] ?? '')}
               onChange={e => set(spec.name, e.target.value)}

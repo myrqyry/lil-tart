@@ -1,6 +1,6 @@
 export interface TensorSpec {
   name: string
-  dtype: 'float32' | 'int32' | 'int8' | 'uint8'
+  dtype: 'float32' | 'int32' | 'int8' | 'uint8' | 'string'
   shape: number[]
   description: string
   constraints?: {
@@ -8,6 +8,8 @@ export interface TensorSpec {
     max?: number
     enum?: string[]
     items?: string[]
+    /** ponytail: marks a free-text field the adapter tokenizes itself in `run`/`prepareInputs`. */
+    text?: boolean
   }
 }
 
