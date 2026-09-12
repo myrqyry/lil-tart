@@ -2,7 +2,7 @@
 const SOT = 49406
 const EOT = 49407
 
-const BYTE_TO_UNICODE: string[] = (() => {
+export const BYTE_TO_UNICODE: string[] = (() => {
   const bs: number[] = []
   for (let i = 33; i <= 126; i++) bs.push(i)
   for (let i = 161; i <= 172; i++) bs.push(i)

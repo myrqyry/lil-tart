@@ -8,9 +8,11 @@ import { visionAdapters } from './vision'
 import { sam2Adapters } from './sam2'
 import { adapters13 } from './batch2'
 import { audioAdapters } from './audio'
+import { textAdapters } from './text'
 
 export const registeredAdapters: ModelAdapter[] = [
   ...audioAdapters,
+  ...textAdapters,
   ...magentaAdapters,
   ...musicCocaAdapters,
   realesrganAdapter,
