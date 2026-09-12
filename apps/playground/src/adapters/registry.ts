@@ -11,10 +11,12 @@ import { audioAdapters } from './audio'
 import { textAdapters } from './text'
 import { ocrAdapters } from './ocr'
 import { ttsAdapters } from './tts'
+import { mimiAdapters } from './mimi'
 
 export const registeredAdapters: ModelAdapter[] = [
   ...audioAdapters,
   ...ttsAdapters,
+  ...mimiAdapters,
   ...textAdapters,
   ...ocrAdapters,
   ...magentaAdapters,
