@@ -118,25 +118,44 @@ const WHISPER_SAMPLES = 480000 // 30 s @ 16 kHz
 const WHISPER_FRAMES = 3000
 const WHISPER_FFT = 400
 const WHISPER_HOP = 160
-const WHISPER_NMELS = 80
 const WHISPER_MAX_TOKENS = 128
-const WHISPER_VOCAB = 51865
 const WHISPER_EOT = 50257
-// <|startoftranscript|><|en|><|transcribe|><|notimestamps|>
-const WHISPER_PROMPT = [50258, 50259, 50359, 50363]
-const WHISPER_TOKENIZER = 'https://huggingface.co/openai/whisper-base/resolve/main/tokenizer.json'
-const WHISPER_MEL = melFilterbankSlaney(WHISPER_RATE, WHISPER_FFT, WHISPER_NMELS, 0, 8000)
 
-// OpenAI Whisper front-end: 80-mel log-spectrogram, global max-8 clamp, (x+4)/4 scaling.
-function whisperFeatures(audio: Float32Array): Float32Array {
+interface WhisperConfig {
+  repo: string
+  file: string
+  modelId: string
+  name: string
+  description: string
+  nMels: number
+  vocab: number
+  /** <|startoftranscript|><|en|><|transcribe|><|notimestamps|>; the two tail ids shift by +1 in the 51866-vocab family. */
+  prompt: number[]
+}
+
+const WHISPER_TOKENIZER = 'https://huggingface.co/openai/whisper-base/resolve/main/tokenizer.json'
+
+// The 128-mel filterbank is only built when a large-v3 config is used.
+const whisperMels = new Map<number, Float32Array>()
+function whisperMel(nMels: number): Float32Array {
+  let mel = whisperMels.get(nMels)
+  if (!mel) {
+    mel = melFilterbankSlaney(WHISPER_RATE, WHISPER_FFT, nMels, 0, 8000)
+    whisperMels.set(nMels, mel)
+  }
+  return mel
+}
+
+// OpenAI Whisper front-end: log-mel spectrogram, global max-8 clamp, (x+4)/4 scaling.
+function whisperFeatures(audio: Float32Array, config: WhisperConfig): Float32Array {
   const padded = new Float32Array(WHISPER_SAMPLES)
   padded.set(audio.subarray(0, Math.min(audio.length, WHISPER_SAMPLES)))
-  const power = melSpectrogram(padded, WHISPER_MEL, WHISPER_NMELS, WHISPER_FFT, WHISPER_HOP, WHISPER_RATE, WHISPER_FFT, WHISPER_SAMPLES)
-  const log = new Float32Array(WHISPER_NMELS * WHISPER_FRAMES)
+  const power = melSpectrogram(padded, whisperMel(config.nMels), config.nMels, WHISPER_FFT, WHISPER_HOP, WHISPER_RATE, WHISPER_FFT, WHISPER_SAMPLES)
+  const log = new Float32Array(config.nMels * WHISPER_FRAMES)
   let max = -Infinity
-  for (let m = 0; m < WHISPER_NMELS; m++) {
+  for (let m = 0; m < config.nMels; m++) {
     for (let t = 0; t < WHISPER_FRAMES; t++) {
-      const value = Math.log10(Math.max(power[t * WHISPER_NMELS + m], 1e-10))
+      const value = Math.log10(Math.max(power[t * config.nMels + m], 1e-10))
       log[m * WHISPER_FRAMES + t] = value
       if (value > max) max = value
     }
@@ -146,15 +165,15 @@ function whisperFeatures(audio: Float32Array): Float32Array {
   return log
 }
 
-async function transcribeWhisper(audio: Float32Array, ctx: InferenceContext): Promise<string> {
-  const features = whisperFeatures(audio)
-  const encoded = await ctx.predict('main', [ctx.createTensor(features, [1, WHISPER_NMELS, WHISPER_FRAMES])], 'encode')
+async function transcribeWhisper(audio: Float32Array, config: WhisperConfig, ctx: InferenceContext): Promise<string> {
+  const features = whisperFeatures(audio, config)
+  const encoded = await ctx.predict('main', [ctx.createTensor(features, [1, config.nMels, WHISPER_FRAMES])], 'encode')
   const states = Object.values(encoded)[0]
 
   const mask = makeCausalMask(WHISPER_MAX_TOKENS)
   const tokens = new Int32Array(WHISPER_MAX_TOKENS).fill(WHISPER_EOT)
-  WHISPER_PROMPT.forEach((id, i) => { tokens[i] = id })
-  let length = WHISPER_PROMPT.length
+  config.prompt.forEach((id, i) => { tokens[i] = id })
+  let length = config.prompt.length
 
   while (length < WHISPER_MAX_TOKENS) {
     const out = await ctx.predict('main', [
@@ -163,7 +182,7 @@ async function transcribeWhisper(audio: Float32Array, ctx: InferenceContext): Pr
       ctx.createTensor(mask, [1, 1, WHISPER_MAX_TOKENS, WHISPER_MAX_TOKENS]),
     ], 'decode')
     const data = (await Object.values(out)[0].data()) as Float32Array
-    const next = argmax(data, (length - 1) * WHISPER_VOCAB, WHISPER_VOCAB)
+    const next = argmax(data, (length - 1) * config.vocab, config.vocab)
     if (next === WHISPER_EOT) break
     tokens[length] = next
     length++
@@ -173,13 +192,13 @@ async function transcribeWhisper(audio: Float32Array, ctx: InferenceContext): Pr
   return tokenizer.decode(Array.from(tokens.subarray(0, length))).trim()
 }
 
-function makeWhisperAdapter(repo: string, file: string, modelId: string, name: string, description: string): ModelAdapter {
+function makeWhisperAdapter(config: WhisperConfig): ModelAdapter {
   return {
-    modelId,
+    modelId: config.modelId,
     metadata: {
-      name,
-      description,
-      modelPath: `https://huggingface.co/litert-community/${repo}/resolve/main/${file}`,
+      name: config.name,
+      description: config.description,
+      modelPath: `https://huggingface.co/litert-community/${config.repo}/resolve/main/${config.file}`,
       tags: ['audio', 'asr', 'whisper'],
     },
     inputSpecs: [{
@@ -206,7 +225,7 @@ function makeWhisperAdapter(repo: string, file: string, modelId: string, name: s
       if (!audio.length) throw new Error('No audio provided')
       const parts: string[] = []
       for (const window of windowsOf(audio, WHISPER_SAMPLES)) {
-        const text = await transcribeWhisper(window, ctx)
+        const text = await transcribeWhisper(window, config, ctx)
         if (text) parts.push(text)
       }
       return { text: parts.join(' ').trim() }
@@ -214,21 +233,49 @@ function makeWhisperAdapter(repo: string, file: string, modelId: string, name: s
   }
 }
 
-export const whisperTinyAdapter = makeWhisperAdapter(
-  'whisper-tiny',
-  'whisper_tiny_30s_f32.tflite',
-  'whisper-tiny',
-  'Whisper Tiny — Speech Recognition',
-  'Multilingual ASR over 30-second windows with a host-side 80-mel front-end.',
-)
+export const whisperTinyAdapter = makeWhisperAdapter({
+  repo: 'whisper-tiny',
+  file: 'whisper_tiny_30s_f32.tflite',
+  modelId: 'whisper-tiny',
+  name: 'Whisper Tiny — Speech Recognition',
+  description: 'Multilingual ASR over 30-second windows with a host-side 80-mel front-end.',
+  nMels: 80,
+  vocab: 51865,
+  prompt: [50258, 50259, 50359, 50363],
+})
 
-export const whisperBaseAdapter = makeWhisperAdapter(
-  'whisper-base',
-  'whisper_base_30s_f32.tflite',
-  'whisper-base',
-  'Whisper Base — Speech Recognition',
-  'Multilingual ASR over 30-second windows with a host-side 80-mel front-end.',
-)
+export const whisperBaseAdapter = makeWhisperAdapter({
+  repo: 'whisper-base',
+  file: 'whisper_base_30s_f32.tflite',
+  modelId: 'whisper-base',
+  name: 'Whisper Base — Speech Recognition',
+  description: 'Multilingual ASR over 30-second windows with a host-side 80-mel front-end.',
+  nMels: 80,
+  vocab: 51865,
+  prompt: [50258, 50259, 50359, 50363],
+})
+
+export const whisperMediumAdapter = makeWhisperAdapter({
+  repo: 'whisper-medium',
+  file: 'whisper_medium_30s_i4.tflite',
+  modelId: 'whisper-medium',
+  name: 'Whisper Medium — Speech Recognition',
+  description: 'Multilingual ASR over 30-second windows with a host-side 80-mel front-end (int4 weights).',
+  nMels: 80,
+  vocab: 51865,
+  prompt: [50258, 50259, 50359, 50363],
+})
+
+export const whisperLargeV3TurboAdapter = makeWhisperAdapter({
+  repo: 'whisper-large-v3-turbo',
+  file: 'whisper_large_v3_turbo_30s_i4.tflite',
+  modelId: 'whisper-large-v3-turbo',
+  name: 'Whisper Large v3 Turbo — Speech Recognition',
+  description: 'Multilingual ASR over 30-second windows with a host-side 128-mel front-end (int4 weights).',
+  nMels: 128,
+  vocab: 51866,
+  prompt: [50258, 50259, 50360, 50364],
+})
 
 const CREPE_PATH = 'https://huggingface.co/litert-community/CREPE-pitch-LiteRT/resolve/main/crepe_full_fp16.tflite'
 const CREPE_FRAME = 1024
@@ -722,4 +769,4 @@ export const graniteSpeechAdapter: ModelAdapter = {
   },
 }
 
-export const audioAdapters: ModelAdapter[] = [moonshineAdapter, whisperTinyAdapter, whisperBaseAdapter, crepeAdapter, wav2vec2Adapter, wav2vec2KeywordAdapter, pannsAdapter, basicPitchAdapter, graniteSpeechAdapter]
+export const audioAdapters: ModelAdapter[] = [moonshineAdapter, whisperTinyAdapter, whisperBaseAdapter, whisperMediumAdapter, whisperLargeV3TurboAdapter, crepeAdapter, wav2vec2Adapter, wav2vec2KeywordAdapter, pannsAdapter, basicPitchAdapter, graniteSpeechAdapter]
