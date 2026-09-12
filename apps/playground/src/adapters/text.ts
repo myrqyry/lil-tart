@@ -519,16 +519,16 @@ const LINT_SIGNATURES = [128, 512]
 const LINT_MAX_RULES = 8
 
 /**
- * Token spans of each rule inside the prompt. ponytail: derived from cumulative
+ * Token spans of each list item inside the prompt. ponytail: derived from cumulative
  * prefix encodings rather than char offsets — the tokenizer isolates `- ` and
- * `\n` into their own chunks, so no BPE merge crosses a rule boundary.
+ * `\n` into their own chunks, so no BPE merge crosses an item boundary.
  */
-function ruleTokenSpans(tokenizer: HfTokenizer, prefix: string, rules: string[]): [number, number][] {
+function itemTokenSpans(tokenizer: HfTokenizer, prefix: string, items: string[], header: string): [number, number][] {
   const spans: [number, number][] = []
-  let pos = 'Policy:\n'.length
-  for (const rule of rules) {
+  let pos = header.length
+  for (const item of items) {
     const start = pos + 2
-    const end = start + rule.length
+    const end = start + item.length
     spans.push([tokenizer.encode(prefix.slice(0, start)).length, tokenizer.encode(prefix.slice(0, end)).length])
     pos = end + 1
   }
@@ -571,7 +571,7 @@ export const policyLinterAdapter: ModelAdapter = {
     const size = smallestSignature(ids.length, LINT_SIGNATURES)
 
     const rulePool = new Float32Array(LINT_MAX_RULES * size)
-    for (const [r, [start, end]] of ruleTokenSpans(tokenizer, prefix, rules).entries()) {
+    for (const [r, [start, end]] of itemTokenSpans(tokenizer, prefix, rules, 'Policy:\n').entries()) {
       const n = end - start
       if (n <= 0) continue
       for (let i = start; i < end; i++) rulePool[r * size + i] = 1 / n
@@ -605,6 +605,85 @@ export const policyLinterAdapter: ModelAdapter = {
   },
 }
 
+const ROUTE_BASE = 'https://huggingface.co/litert-community/LFM2.5-Encoder-350M-Prompt-Router/resolve/main'
+const ROUTE_SIGNATURES = [128, 512]
+const ROUTE_MAX_LANES = 8
+
+export const promptRouterAdapter: ModelAdapter = {
+  modelId: 'lfm2.5-prompt-router',
+  metadata: {
+    name: 'LFM2.5-Encoder-350M-Prompt-Router',
+    description: 'Routes a prompt to one of up to 8 named lanes in a single pass, returning per-lane confidence.',
+    modelPath: `${ROUTE_BASE}/LFM2.5-Encoder-350M-Prompt-Router_wi8fc.tflite`,
+    tags: ['text', 'router', 'classification'],
+  },
+  inputSpecs: [
+    { name: 'text', dtype: 'string', shape: [], description: 'Prompt to route', constraints: { text: true } },
+    { name: 'lanes', dtype: 'string', shape: [], description: 'Routing lanes, one per line (up to 8)', constraints: { text: true } },
+  ],
+  outputSpecs: [{ name: 'routes', dtype: 'float32', shape: [], description: 'Per-lane confidence, ranked' }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const text = String(values['text'] ?? '').trim()
+    const lanes = String(values['lanes'] ?? '')
+      .split('\n')
+      .map((lane) => lane.trim())
+      .filter(Boolean)
+      .slice(0, ROUTE_MAX_LANES)
+    if (!text) throw new Error('Provide a prompt to route')
+    if (!lanes.length) throw new Error('Provide at least one lane')
+
+    const tokenizer = await loadHfTokenizer(`${ROUTE_BASE}/tokenizer.json`)
+    const prefix = `Categories:\n${lanes.map((lane) => `- ${lane}`).join('\n')}\n\nText:\n`
+    const ids = tokenizer.encode(prefix + text)
+    if (ids.length > ROUTE_SIGNATURES[ROUTE_SIGNATURES.length - 1]) throw new Error('Prompt and lanes exceed 512 tokens')
+    const size = smallestSignature(ids.length, ROUTE_SIGNATURES)
+
+    const categoryPool = new Float32Array(ROUTE_MAX_LANES * size)
+    for (const [r, [start, end]] of itemTokenSpans(tokenizer, prefix, lanes, 'Categories:\n').entries()) {
+      const n = end - start
+      if (n <= 0) continue
+      for (let i = start; i < end; i++) categoryPool[r * size + i] = 1 / n
+    }
+
+    const textStart = tokenizer.encode(prefix).length
+    const textPool = new Float32Array(size)
+    const textCount = ids.length - textStart
+    for (let i = textStart; i < ids.length; i++) textPool[i] = 1 / textCount
+
+    const inputIds = new Int32Array(size)
+    inputIds.set(ids)
+    const mask = new Int32Array(size)
+    for (let i = 0; i < ids.length; i++) mask[i] = 1
+
+    const result = await ctx.predict(
+      'main',
+      {
+        input_ids: ctx.createTensor(inputIds, [1, size]),
+        attention_mask: ctx.createTensor(mask, [1, size]),
+        text_pool: ctx.createTensor(textPool, [1, 1, size]),
+        category_pool: ctx.createTensor(categoryPool, [1, ROUTE_MAX_LANES, size]),
+      },
+      `route_${size}`,
+    )
+    const logits = (await Object.values(result)[0].data()) as Float32Array
+
+    let max = -Infinity
+    for (let r = 0; r < lanes.length; r++) if (logits[r] > max) max = logits[r]
+    let sum = 0
+    for (let r = 0; r < lanes.length; r++) sum += Math.exp(logits[r] - max)
+    const ranked = lanes
+      .map((lane, r) => ({ lane, p: Math.exp(logits[r] - max) / sum }))
+      .sort((a, b) => b.p - a.p)
+    return { routes: ranked.map(({ lane, p }) => `${(p * 100).toFixed(1)}%  ${lane}`).join('\n') }
+  },
+}
+
 export const textAdapters: ModelAdapter[] = [
   mxbaiColbertAdapter,
   mlateonAdapter,
@@ -620,4 +699,5 @@ export const textAdapters: ModelAdapter[] = [
   ettinRerankerAdapter,
   piiDetectorAdapter,
   policyLinterAdapter,
+  promptRouterAdapter,
 ]
