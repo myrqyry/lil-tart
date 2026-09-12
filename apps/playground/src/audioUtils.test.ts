@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeDeltas, decodeSentencePiece, encodeWav, fft, logMelSpectrogram, makeCausalMask, melFilterbank, melFilterbankSlaney, melSpectrogram, resampleToMono, windowsOf } from './audioUtils'
+import { computeDeltas, decodeSentencePiece, decodeUnigram, encodeWav, fft, logMelSpectrogram, makeCausalMask, melFilterbank, melFilterbankSlaney, melSpectrogram, resampleToMono, windowsOf } from './audioUtils'
 
 describe('resampleToMono', () => {
   it('downmixes stereo to mono at the same rate', () => {
@@ -40,6 +40,18 @@ describe('decodeSentencePiece', () => {
 
   it('skips unknown ids', () => {
     expect(decodeSentencePiece([5, 999], vocab)).toBe('hello')
+  })
+})
+
+describe('decodeUnigram', () => {
+  const pieces = ['<unk>', '<s>', '▁', 'あ', 'い', 'う', '。']
+
+  it('joins pieces and turns metaspace into spaces', () => {
+    expect(decodeUnigram([2, 3, 4, 6], pieces)).toBe('あい。')
+  })
+
+  it('drops special tokens and trims', () => {
+    expect(decodeUnigram([1, 2, 5], pieces)).toBe('う')
   })
 })
 

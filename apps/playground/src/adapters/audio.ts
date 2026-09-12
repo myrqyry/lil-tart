@@ -1,5 +1,5 @@
 import type { InferenceContext, ModelAdapter } from './types'
-import { computeDeltas, decodeSentencePiece, logMelSpectrogram, makeCausalMask, melFilterbank, melFilterbankSlaney, melSpectrogram, windowsOf } from '../audioUtils'
+import { computeDeltas, decodeSentencePiece, decodeUnigram, logMelSpectrogram, makeCausalMask, melFilterbank, melFilterbankSlaney, melSpectrogram, windowsOf } from '../audioUtils'
 import { loadHfTokenizer } from '../hfTokenizer'
 import { flatten } from './util'
 
@@ -769,4 +769,138 @@ export const graniteSpeechAdapter: ModelAdapter = {
   },
 }
 
-export const audioAdapters: ModelAdapter[] = [moonshineAdapter, whisperTinyAdapter, whisperBaseAdapter, whisperMediumAdapter, whisperLargeV3TurboAdapter, crepeAdapter, wav2vec2Adapter, wav2vec2KeywordAdapter, pannsAdapter, basicPitchAdapter, graniteSpeechAdapter]
+const PARAKEET_BASE = 'https://huggingface.co/litert-community/parakeet-tdt_ctc-0.6b-ja/resolve/main'
+const PARAKEET_RATE = 16000
+const PARAKEET_SAMPLES = 80000 // 5 s @ 16 kHz
+const PARAKEET_FRAMES = 500
+const PARAKEET_NMELS = 80
+const PARAKEET_FFT = 512
+const PARAKEET_WIN = 400
+const PARAKEET_HOP = 160
+const PARAKEET_STEPS = 63
+const PARAKEET_TOKENS = 64
+const PARAKEET_VOCAB = 3072
+const PARAKEET_BLANK = 3072
+const PARAKEET_LOGIT_WIDTH = 3078 // 3072 tokens + blank + 5 TDT durations
+const PARAKEET_LSTM = 640
+
+let paraMel: Float32Array | null = null
+function parakeetMel(): Float32Array {
+  if (!paraMel) paraMel = melFilterbankSlaney(PARAKEET_RATE, PARAKEET_FFT, PARAKEET_NMELS, 0, 8000)
+  return paraMel
+}
+
+// NeMo FastConformer front-end: preemphasis 0.97, log-mel, per-feature mean/var normalization.
+function nemoFeatures(audio: Float32Array): Float32Array {
+  const padded = new Float32Array(PARAKEET_SAMPLES)
+  padded.set(audio.subarray(0, Math.min(audio.length, PARAKEET_SAMPLES)))
+  const pre = new Float32Array(PARAKEET_SAMPLES)
+  pre[0] = padded[0]
+  for (let i = 1; i < PARAKEET_SAMPLES; i++) pre[i] = padded[i] - 0.97 * padded[i - 1]
+
+  const power = melSpectrogram(pre, parakeetMel(), PARAKEET_NMELS, PARAKEET_FFT, PARAKEET_HOP, PARAKEET_RATE, PARAKEET_WIN, PARAKEET_SAMPLES)
+  const log = new Float32Array(PARAKEET_NMELS * PARAKEET_FRAMES)
+  for (let t = 0; t < PARAKEET_FRAMES; t++) {
+    for (let m = 0; m < PARAKEET_NMELS; m++) log[m * PARAKEET_FRAMES + t] = Math.log(power[t * PARAKEET_NMELS + m] + 2 ** -24)
+  }
+  for (let m = 0; m < PARAKEET_NMELS; m++) {
+    const row = m * PARAKEET_FRAMES
+    let mean = 0
+    for (let t = 0; t < PARAKEET_FRAMES; t++) mean += log[row + t]
+    mean /= PARAKEET_FRAMES
+    let variance = 0
+    for (let t = 0; t < PARAKEET_FRAMES; t++) variance += (log[row + t] - mean) ** 2
+    const denom = Math.sqrt(variance / (PARAKEET_FRAMES - 1)) + 1e-5
+    for (let t = 0; t < PARAKEET_FRAMES; t++) log[row + t] = (log[row + t] - mean) / denom
+  }
+  return log
+}
+
+let paraPieces: Promise<string[]> | null = null
+function loadParaPieces(): Promise<string[]> {
+  if (!paraPieces) {
+    paraPieces = fetch(`${PARAKEET_BASE}/tokenizer.json`)
+      .then(r => r.json())
+      .then((json: { model: { vocab: [string, number][] } }) => json.model.vocab.map(entry => entry[0]))
+      .catch(err => { paraPieces = null; throw err })
+  }
+  return paraPieces
+}
+
+// Greedy TDT decode: per step pick a token + duration from the (step, slot) logit vector.
+async function transcribeParakeet(audio: Float32Array, ctx: InferenceContext): Promise<string> {
+  const features = nemoFeatures(audio)
+  const encoded = await ctx.predict('main', [ctx.createTensor(features, [1, PARAKEET_NMELS, PARAKEET_FRAMES])], 'encode')
+  const states = Object.values(encoded)[0]
+
+  const h = new Float32Array(2 * PARAKEET_LSTM)
+  const c = new Float32Array(2 * PARAKEET_LSTM)
+  const tokens = new Int32Array(PARAKEET_TOKENS)
+  tokens[0] = PARAKEET_BLANK
+  const emitted: number[] = []
+  let t = 0
+  let k = 0
+
+  while (t < PARAKEET_STEPS) {
+    const out = await ctx.predict('main', [
+      states,
+      ctx.createTensor(tokens, [1, PARAKEET_TOKENS]),
+      ctx.createTensor(h, [2, 1, PARAKEET_LSTM]),
+      ctx.createTensor(c, [2, 1, PARAKEET_LSTM]),
+    ], 'decode')
+    const logits = (await Object.values(out)[0].data()) as Float32Array
+    const base = (t * PARAKEET_TOKENS + k) * PARAKEET_LOGIT_WIDTH
+    const token = argmax(logits, base, PARAKEET_VOCAB + 1)
+    const duration = argmax(logits, base + PARAKEET_VOCAB + 1, PARAKEET_LOGIT_WIDTH - PARAKEET_VOCAB - 1)
+    if (token !== PARAKEET_BLANK) {
+      emitted.push(token)
+      k++
+      if (k >= PARAKEET_STEPS) break
+      tokens[k] = token
+    }
+    t += duration === 0 && token === PARAKEET_BLANK ? 1 : duration
+  }
+
+  return decodeUnigram(emitted, await loadParaPieces())
+}
+
+export const parakeetJapaneseAdapter: ModelAdapter = {
+  modelId: 'parakeet-ja',
+  metadata: {
+    name: 'Parakeet TDT-CTC 0.6B (Japanese) — Speech Recognition',
+    description: 'Japanese ASR with punctuation and a host NeMo log-mel front-end (int8, runs on CPU).',
+    modelPath: `${PARAKEET_BASE}/parakeet_tdt_ctc_0.6b_ja_5s_i8.tflite`,
+    tags: ['audio', 'asr', 'parakeet', 'japanese'],
+  },
+  inputSpecs: [{
+    name: 'audio',
+    dtype: 'float32',
+    shape: [1, PARAKEET_SAMPLES],
+    description: 'Mono PCM at 16 kHz in [-1, 1]; clips are split into 5-second windows',
+  }],
+  outputSpecs: [{
+    name: 'text',
+    dtype: 'float32',
+    shape: [],
+    description: 'Transcribed text',
+  }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const raw = values['audio']
+    const audio = raw instanceof Float32Array ? raw : flatten(raw ?? [])
+    if (!audio.length) throw new Error('No audio provided')
+    const parts: string[] = []
+    for (const window of windowsOf(audio, PARAKEET_SAMPLES)) {
+      const text = await transcribeParakeet(window, ctx)
+      if (text) parts.push(text)
+    }
+    return { text: parts.join(' ').trim() }
+  },
+}
+
+export const audioAdapters: ModelAdapter[] = [moonshineAdapter, whisperTinyAdapter, whisperBaseAdapter, whisperMediumAdapter, whisperLargeV3TurboAdapter, parakeetJapaneseAdapter, crepeAdapter, wav2vec2Adapter, wav2vec2KeywordAdapter, pannsAdapter, basicPitchAdapter, graniteSpeechAdapter]

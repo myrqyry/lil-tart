@@ -49,6 +49,17 @@ export function decodeSentencePiece(ids: number[], vocab: string[]): string {
   return new TextDecoder().decode(new Uint8Array(bytes)).replace(/^\s+/, '')
 }
 
+/** SentencePiece Unigram decode: join pieces, `▁`→space, drop `<...>` specials, strip. */
+export function decodeUnigram(ids: number[], pieces: string[]): string {
+  let text = ''
+  for (const id of ids) {
+    const piece = pieces[id]
+    if (!piece || (piece.startsWith('<') && piece.endsWith('>'))) continue
+    text += piece.replace(/▁/g, ' ')
+  }
+  return text.trim()
+}
+
 /** Split audio into fixed-size windows (last one may be shorter; caller zero-pads). */
 export function windowsOf(audio: Float32Array, size: number): Float32Array[] {
   if (!audio.length) return [new Float32Array(0)]
