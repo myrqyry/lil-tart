@@ -99,3 +99,29 @@ describe('HfTokenizer (LFM-style: regex Split + post_processor Sequence)', () =>
     expect(ci.encode("'s")).toEqual([5])
   })
 })
+
+describe('HfTokenizer (pair template)', () => {
+  const pair = new HfTokenizer({
+    ...json,
+    post_processor: {
+      type: 'TemplateProcessing',
+      single: [{ SpecialToken: { id: '[CLS]' } }, { Sequence: { id: 'A' } }, { SpecialToken: { id: '[SEP]' } }],
+      pair: [
+        { SpecialToken: { id: '[CLS]' } },
+        { Sequence: { id: 'A' } },
+        { SpecialToken: { id: '[SEP]' } },
+        { Sequence: { id: 'B' } },
+        { SpecialToken: { id: '[SEP]' } },
+      ],
+      special_tokens: { '[CLS]': { ids: [1] }, '[SEP]': { ids: [2] } },
+    },
+  })
+
+  it('joins both sequences through the pair template', () => {
+    expect(pair.encodePair('ab', 'ab')).toEqual([1, 12, 2, 12, 2])
+  })
+
+  it('truncates longest_first to the budget and pads to the signature length', () => {
+    expect(pair.encodePair('ab', 'ab', { maxLength: 4, length: 4, padId: 9 })).toEqual([1, 2, 12, 2])
+  })
+})

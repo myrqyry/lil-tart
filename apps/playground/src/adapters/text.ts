@@ -318,6 +318,60 @@ export const harrierEmbedAdapter = makeEmbeddingAdapter({
   queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ',
 })
 
+const ETTIN_BASE = 'https://huggingface.co/litert-community/ettin-reranker-400m-v1/resolve/main'
+const ETTIN_SIGNATURES = [128, 256, 512]
+const ETTIN_PAD_ID = 50283
+
+/** Scores one (query, passage) pair through the cross-encoder; returns the raw relevance logit. */
+async function rerankerScore(query: string, passage: string, ctx: InferenceContext): Promise<number> {
+  const tokenizer = await loadHfTokenizer(`${ETTIN_BASE}/tokenizer.json`)
+  const size = smallestSignature(tokenizer.encodePair(query, passage).length, ETTIN_SIGNATURES)
+  const ids = tokenizer.encodePair(query, passage, { maxLength: size, length: size, padId: ETTIN_PAD_ID })
+  const inputIds = Int32Array.from(ids)
+  const attentionMask = Int32Array.from(ids, (id) => (id === ETTIN_PAD_ID ? 0 : 1))
+  const result = await ctx.predict(
+    'main',
+    { input_ids: ctx.createTensor(inputIds, [1, size]), attention_mask: ctx.createTensor(attentionMask, [1, size]) },
+    `score_${size}`,
+  )
+  const data = await Object.values(result)[0].data()
+  return data[0]
+}
+
+export const ettinRerankerAdapter: ModelAdapter = {
+  modelId: 'ettin-reranker',
+  metadata: {
+    name: 'Ettin Reranker 400M',
+    description: 'Cross-encoder reranker. Scores each candidate passage against the query with a raw relevance logit (do not sigmoid).',
+    modelPath: `${ETTIN_BASE}/ettin-reranker-400m-v1_wi8fc.tflite`,
+    tags: ['text', 'reranker'],
+  },
+  inputSpecs: [
+    { name: 'query', dtype: 'string', shape: [], description: 'Search query', constraints: { text: true } },
+    { name: 'passages', dtype: 'string', shape: [], description: 'Candidate passages, one per line', constraints: { text: true } },
+  ],
+  outputSpecs: [{ name: 'scores', dtype: 'float32', shape: [], description: 'Raw relevance logits, highest first' }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const query = String(values['query'] ?? '').trim()
+    const passages = String(values['passages'] ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .slice(0, 20)
+    if (!query) throw new Error('Provide a query')
+    if (!passages.length) throw new Error('Provide at least one passage')
+    const scored = await Promise.all(passages.map(async (passage) => ({ passage, score: await rerankerScore(query, passage, ctx) })))
+    scored.sort((a, b) => b.score - a.score)
+    return { scores: scored.map(({ passage, score }) => `${score.toFixed(4)}  ${passage}`).join('\n') }
+  },
+}
+
 export const textAdapters: ModelAdapter[] = [
   mxbaiColbertAdapter,
   mlateonAdapter,
@@ -328,4 +382,5 @@ export const textAdapters: ModelAdapter[] = [
   voyageEmbedAdapter,
   nemotronEmbedAdapter,
   harrierEmbedAdapter,
+  ettinRerankerAdapter,
 ]

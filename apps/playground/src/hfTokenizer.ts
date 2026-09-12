@@ -34,6 +34,7 @@ export class HfTokenizer {
   private byteLevel: boolean
   private prefixSpace: boolean
   private template: HfNode | null
+  private pairTemplate: HfNode | null
   private unkId: number
 
   constructor(json: HfTokenizerJson) {
@@ -50,6 +51,7 @@ export class HfTokenizer {
     const info = postProcessorInfo(json.post_processor ?? null)
     this.prefixSpace = info.prefixSpace
     this.template = info.template
+    this.pairTemplate = info.pairTemplate
     const unk =
       json.post_processor?.special_tokens?.['[UNK]']?.ids?.[0] ??
       (json.model.unk_token ? this.vocab[json.model.unk_token] : undefined) ??
@@ -125,10 +127,29 @@ export class HfTokenizer {
   encode(text: string, options: HfEncodeOptions = {}): number[] {
     let ids = this.bodyIds(this.prefixSpace ? ` ${text}` : text)
     if (options.maxLength !== undefined) {
-      const specials = countTemplateSpecials(this.template)
+      const specials = countSpecials(this.template?.single)
       ids = ids.slice(0, Math.max(0, options.maxLength - specials))
     }
     const out = applyPostProcessor(this.template, ids)
+    if (options.length !== undefined) {
+      while (out.length < options.length) out.push(options.padId ?? 0)
+    }
+    return out
+  }
+
+  /** Encodes a text pair through the tokenizer's `pair` template (e.g. `[CLS] A [SEP] B [SEP]`). */
+  encodePair(a: string, b: string, options: HfEncodeOptions = {}): number[] {
+    let aIds = this.bodyIds(this.prefixSpace ? ` ${a}` : a)
+    let bIds = this.bodyIds(this.prefixSpace ? ` ${b}` : b)
+    if (options.maxLength !== undefined) {
+      const entries = this.pairTemplate ? this.pairTemplate.pair : this.template?.single
+      const budget = Math.max(0, options.maxLength - countSpecials(entries))
+      while (aIds.length + bIds.length > budget) {
+        if (aIds.length >= bIds.length) aIds = aIds.slice(0, -1)
+        else bIds = bIds.slice(0, -1)
+      }
+    }
+    const out = this.pairTemplate ? applyPairTemplate(this.pairTemplate, aIds, bIds) : applyPostProcessor(this.template, [...aIds, ...bIds])
     if (options.length !== undefined) {
       while (out.length < options.length) out.push(options.padId ?? 0)
     }
@@ -221,26 +242,27 @@ function usesByteLevel(node: HfNode | null): boolean {
 }
 
 /** Flattens a post_processor into the TemplateProcessing node plus any ByteLevel prefix-space request. */
-function postProcessorInfo(node: HfNode | null): { prefixSpace: boolean; template: HfNode | null } {
-  if (!node) return { prefixSpace: false, template: null }
-  if (node.type === 'ByteLevel') return { prefixSpace: Boolean(node.add_prefix_space), template: null }
-  if (node.type === 'TemplateProcessing') return { prefixSpace: false, template: node }
+function postProcessorInfo(node: HfNode | null): { prefixSpace: boolean; template: HfNode | null; pairTemplate: HfNode | null } {
+  if (!node) return { prefixSpace: false, template: null, pairTemplate: null }
+  if (node.type === 'ByteLevel') return { prefixSpace: Boolean(node.add_prefix_space), template: null, pairTemplate: null }
+  if (node.type === 'TemplateProcessing') return { prefixSpace: false, template: node, pairTemplate: node.pair ? node : null }
   if (node.type === 'Sequence') {
     let prefixSpace = false
     let template: HfNode | null = null
+    let pairTemplate: HfNode | null = null
     for (const child of node.processors as HfNode[]) {
       const info = postProcessorInfo(child)
       prefixSpace ||= info.prefixSpace
       template = info.template ?? template
+      pairTemplate = info.pairTemplate ?? pairTemplate
     }
-    return { prefixSpace, template }
+    return { prefixSpace, template, pairTemplate }
   }
   throw new Error(`hfTokenizer: unsupported post_processor "${node.type}"`)
 }
 
-function countTemplateSpecials(node: HfNode | null): number {
-  if (!node || node.type !== 'TemplateProcessing') return 0
-  return (node.single as HfNode[]).filter((entry) => entry.SpecialToken).length
+function countSpecials(entries: HfNode[] | undefined): number {
+  return (entries ?? []).filter((entry) => entry.SpecialToken).length
 }
 
 function applyPostProcessor(node: HfNode | null, ids: number[]): number[] {
@@ -251,6 +273,16 @@ function applyPostProcessor(node: HfNode | null, ids: number[]): number[] {
   for (const entry of node.single as HfNode[]) {
     if (entry.SpecialToken) out.push(...(specials[entry.SpecialToken.id]?.ids ?? []))
     else if (entry.Sequence) out.push(...ids)
+  }
+  return out
+}
+
+function applyPairTemplate(node: HfNode, aIds: number[], bIds: number[]): number[] {
+  const specials = (node.special_tokens ?? {}) as Record<string, { ids: number[] }>
+  const out: number[] = []
+  for (const entry of node.pair as HfNode[]) {
+    if (entry.SpecialToken) out.push(...(specials[entry.SpecialToken.id]?.ids ?? []))
+    else if (entry.Sequence) out.push(...(entry.Sequence.id === 'B' ? bIds : aIds))
   }
   return out
 }
