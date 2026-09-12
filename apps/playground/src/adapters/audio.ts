@@ -366,4 +366,82 @@ export const pannsAdapter: ModelAdapter = {
   },
 }
 
-export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter, pannsAdapter]
+const BASIC_PITCH_PATH = 'https://huggingface.co/litert-community/Basic-Pitch-LiteRT/resolve/main/basicpitch.tflite'
+const BASIC_PITCH_RATE = 22050
+const BASIC_PITCH_SAMPLES = 43844 // 2 s @ 22.05 kHz
+const BASIC_PITCH_FRAMES = 172
+const BASIC_PITCH_BINS = 88 // MIDI 21..108
+const BASIC_PITCH_MIDI_BASE = 21
+const BASIC_PITCH_HOP = 256
+
+function midiName(midi: number): string {
+  const rounded = Math.round(midi)
+  return `${NOTE_NAMES[((rounded % 12) + 12) % 12]}${Math.floor(rounded / 12) - 1}`
+}
+
+export const basicPitchAdapter: ModelAdapter = {
+  modelId: 'basic-pitch',
+  metadata: {
+    name: 'Basic Pitch — Music Transcription',
+    description: 'Polyphonic note detection (MIDI 21–108) from 2-second windows of 22.05 kHz audio. Single graph, note posteriorgram decoded host-side.',
+    modelPath: BASIC_PITCH_PATH,
+    tags: ['audio', 'music', 'transcription', 'basic-pitch'],
+  },
+  inputSpecs: [{
+    name: 'audio',
+    dtype: 'float32',
+    shape: [1, BASIC_PITCH_SAMPLES],
+    description: 'Mono PCM at 22.05 kHz in [-1, 1]; split into 2-second windows',
+    constraints: { sampleRate: BASIC_PITCH_RATE },
+  }],
+  outputSpecs: [{
+    name: 'notes',
+    dtype: 'float32',
+    shape: [],
+    description: 'Detected notes (start time · name · duration)',
+  }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const raw = values['audio']
+    const audio = raw instanceof Float32Array ? raw : flatten(raw ?? [])
+    if (!audio.length) throw new Error('No audio provided')
+
+    const events: { midi: number; start: number; end: number }[] = []
+    const active = new Map<number, number>() // key -> global start frame
+    let globalFrame = 0
+
+    for (const window of windowsOf(audio, BASIC_PITCH_SAMPLES)) {
+      const input = new Float32Array(BASIC_PITCH_SAMPLES)
+      input.set(window.subarray(0, BASIC_PITCH_SAMPLES))
+      const out = await ctx.predict('main', [ctx.createTensor(input, [1, BASIC_PITCH_SAMPLES])])
+      const note = (await Object.values(out)[1].data()) as Float32Array // outputs: contour, note, onset
+
+      for (let frame = 0; frame < BASIC_PITCH_FRAMES; frame++) {
+        for (let key = 0; key < BASIC_PITCH_BINS; key++) {
+          if (note[frame * BASIC_PITCH_BINS + key] > 0.5) {
+            if (!active.has(key)) active.set(key, globalFrame + frame)
+          } else if (active.has(key)) {
+            events.push({ midi: key + BASIC_PITCH_MIDI_BASE, start: active.get(key)!, end: globalFrame + frame })
+            active.delete(key)
+          }
+        }
+      }
+      globalFrame += BASIC_PITCH_FRAMES
+    }
+    for (const [key, start] of active) events.push({ midi: key + BASIC_PITCH_MIDI_BASE, start, end: globalFrame })
+
+    // ponytail: frame-threshold decoding; onset-triggered decoding would sharpen attacks
+    events.sort((a, b) => a.start - b.start)
+    const seconds = (frame: number) => (frame * BASIC_PITCH_HOP) / BASIC_PITCH_RATE
+    const lines = events.slice(0, 200).map(e =>
+      `${seconds(e.start).toFixed(2)}s  ${midiName(e.midi)} (midi ${e.midi})  ${seconds(e.end - e.start).toFixed(2)}s`)
+    return { notes: lines.length ? lines.join('\n') : 'No notes detected' }
+  },
+}
+
+export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter, pannsAdapter, basicPitchAdapter]
