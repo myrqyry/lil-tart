@@ -401,6 +401,119 @@ export const ettinRerankerAdapter: ModelAdapter = {
   },
 }
 
+const PII_BASE = 'https://huggingface.co/litert-community/LFM2.5-Encoder-350M-PII-Detector/resolve/main'
+const PII_SIGNATURES = [128, 512]
+const PII_LOGIT_WIDTH = 161
+const PII_NUM_LABELS = 109
+const PII_SCHEME = ['B', 'I', 'E', 'S']
+
+// label_schema.json types_in_order; id 1 + 4*i + {B:0,I:1,E:2,S:3}, id 0 = O.
+const PII_TYPES = [
+  'contact.address', 'contact.email', 'contact.ip_address', 'contact.phone', 'contact.postal_code',
+  'credential.api_key', 'device.mac_address',
+  'financial.bank_account', 'financial.credit_card', 'financial.iban', 'financial.swift_bic',
+  'healthcare.condition', 'healthcare.medical_record', 'healthcare.medication',
+  'identity.date_of_birth', 'identity.drivers_license', 'identity.national_id', 'identity.passport',
+  'identity.person_name', 'identity.ssn',
+  'legal.case_number', 'location.gps_coordinates',
+  'online.url', 'online.username', 'org.company_name',
+  'special.political', 'special.religion',
+]
+
+function piiLabel(id: number): string {
+  if (id === 0) return 'O'
+  return `${PII_SCHEME[(id - 1) & 3]}-${PII_TYPES[(id - 1) >> 2]}`
+}
+
+function readableToken(token: string): string {
+  return token.replace(/Ċ/g, '\n').replace(/[Ġ▁]/g, ' ')
+}
+
+/** Groups a per-token BIOES tag sequence into `<type>  <text>` lines. */
+function decodePiiSpans(tags: number[], tokens: string[]): string {
+  const spans: { type: string; text: string }[] = []
+  let current: { type: string; text: string } | null = null
+  const flush = () => {
+    if (current) spans.push(current)
+    current = null
+  }
+  for (let i = 0; i < tags.length; i++) {
+    const label = piiLabel(tags[i])
+    if (label === 'O') {
+      flush()
+      continue
+    }
+    const type = label.slice(2)
+    const piece = readableToken(tokens[i] ?? '')
+    if (label[0] === 'S') {
+      flush()
+      spans.push({ type, text: piece })
+    } else if (label[0] === 'B' || !current || current.type !== type) {
+      flush()
+      current = { type, text: piece }
+    } else if (label[0] === 'E') {
+      current.text += piece
+      flush()
+    } else {
+      current.text += piece
+    }
+  }
+  flush()
+  return spans.map((span) => `${span.type}  ${span.text.trim()}`).join('\n')
+}
+
+export const piiDetectorAdapter: ModelAdapter = {
+  modelId: 'lfm2.5-pii',
+  metadata: {
+    name: 'LFM2.5-Encoder-350M-PII-Detector',
+    description: 'Detects ~40 kinds of personal information (emails, phone numbers, names, IDs…) across 16 languages and returns the tagged spans.',
+    modelPath: `${PII_BASE}/LFM2.5-Encoder-350M-PII-Detector_wi8fc.tflite`,
+    tags: ['text', 'ner', 'privacy'],
+  },
+  inputSpecs: [{ name: 'text', dtype: 'string', shape: [], description: 'Text to scan for personal information', constraints: { text: true } }],
+  outputSpecs: [{ name: 'entities', dtype: 'float32', shape: [], description: 'Detected entities as "<type>  <text>" lines' }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const text = String(values['text'] ?? '').trim()
+    if (!text) throw new Error('Provide text to scan')
+    const tokenizer = await loadHfTokenizer(`${PII_BASE}/tokenizer.json`)
+    const ids = tokenizer.encode(text, { maxLength: PII_SIGNATURES[PII_SIGNATURES.length - 1] })
+    const size = smallestSignature(ids.length, PII_SIGNATURES)
+    const inputIds = new Int32Array(size)
+    inputIds.set(ids)
+    const mask = new Int32Array(size)
+    for (let i = 0; i < ids.length; i++) mask[i] = 1
+
+    const result = await ctx.predict(
+      'main',
+      { input_ids: ctx.createTensor(inputIds, [1, size]), attention_mask: ctx.createTensor(mask, [1, size]) },
+      `pii_${size}`,
+    )
+    const logits = (await Object.values(result)[0].data()) as Float32Array
+    const tags: number[] = []
+    const tokens: string[] = []
+    for (let t = 0; t < ids.length; t++) {
+      let best = 0
+      let bestScore = logits[t * PII_LOGIT_WIDTH]
+      for (let c = 1; c < PII_NUM_LABELS; c++) {
+        const score = logits[t * PII_LOGIT_WIDTH + c]
+        if (score > bestScore) {
+          bestScore = score
+          best = c
+        }
+      }
+      tags.push(best)
+      tokens.push(tokenizer.tokenOf(ids[t]) ?? '')
+    }
+    return { entities: decodePiiSpans(tags, tokens) || 'No personal information detected' }
+  },
+}
+
 export const textAdapters: ModelAdapter[] = [
   mxbaiColbertAdapter,
   mlateonAdapter,
@@ -414,4 +527,5 @@ export const textAdapters: ModelAdapter[] = [
   lfm2Encoder350Adapter,
   gigaEmbedAdapter,
   ettinRerankerAdapter,
+  piiDetectorAdapter,
 ]
