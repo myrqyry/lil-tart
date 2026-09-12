@@ -97,6 +97,8 @@ interface EmbeddingConfig {
   dim: number
   pool: 'mean' | 'cls'
   signaturePrefix: string
+  queryPrefix?: string
+  documentPrefix?: string
 }
 
 function l2Normalize(vector: Float32Array): Float32Array {
@@ -114,9 +116,9 @@ function cosine(a: Float32Array, b: Float32Array): number {
 }
 
 /** Encodes one text through a signature encoder into a single sentence vector. */
-async function embedText(text: string, config: EmbeddingConfig, ctx: InferenceContext): Promise<Float32Array> {
+async function embedText(text: string, config: EmbeddingConfig, ctx: InferenceContext, prefix = ''): Promise<Float32Array> {
   const tokenizer = await loadHfTokenizer(`${config.base}/tokenizer.json`)
-  const ids = tokenizer.encode(text, { maxLength: config.signatures[config.signatures.length - 1] })
+  const ids = tokenizer.encode(prefix + text, { maxLength: config.signatures[config.signatures.length - 1] })
   const size = config.signatures.find((signature) => signature >= ids.length) ?? config.signatures[config.signatures.length - 1]
   const inputIds = new Int32Array(size)
   inputIds.set(ids)
@@ -152,8 +154,8 @@ function makeEmbeddingAdapter(config: EmbeddingConfig): ModelAdapter {
       const textA = String(values.text_a ?? '').trim()
       const textB = String(values.text_b ?? '').trim()
       if (!textA || !textB) throw new Error('Provide both texts')
-      const vectorA = await embedText(textA, config, ctx)
-      const vectorB = await embedText(textB, config, ctx)
+      const vectorA = await embedText(textA, config, ctx, config.queryPrefix)
+      const vectorB = await embedText(textB, config, ctx, config.documentPrefix)
       return { similarity: Number(cosine(vectorA, vectorB).toFixed(4)), dims: config.dim }
     },
   }
@@ -188,4 +190,71 @@ export const graniteEmbedAdapter = makeEmbeddingAdapter({
   signaturePrefix: 'embed',
 })
 
-export const textAdapters: ModelAdapter[] = [mxbaiColbertAdapter, lfm2EncoderAdapter, graniteEmbedAdapter]
+export const lfm2EmbeddingAdapter = makeEmbeddingAdapter({
+  modelId: 'lfm2.5-embedding',
+  name: 'LFM2.5-Embedding-350M',
+  description: 'Multilingual sentence-embedding model. CLS pooling and L2 normalization are inside the graph; reports the cosine similarity of two texts.',
+  tags: ['text', 'embedding'],
+  base: 'https://huggingface.co/litert-community/LFM2.5-Embedding-350M/resolve/main',
+  file: 'LFM2.5-Embedding-350M_wi8fc.tflite',
+  signatures: [64, 128, 256, 512],
+  dim: 1024,
+  pool: 'cls',
+  signaturePrefix: 'embed',
+  queryPrefix: 'query: ',
+  documentPrefix: 'document: ',
+})
+
+export const voyageEmbedAdapter = makeEmbeddingAdapter({
+  modelId: 'voyage-4-nano',
+  name: 'voyage-4-nano',
+  description: 'Multilingual 2048-dim embedding model. Projection, mean pooling and L2 normalization are inside the graph; reports the cosine similarity of two texts.',
+  tags: ['text', 'embedding'],
+  base: 'https://huggingface.co/litert-community/voyage-4-nano/resolve/main',
+  file: 'voyage-4-nano_wi8fc.tflite',
+  signatures: [64, 128, 256, 512],
+  dim: 2048,
+  pool: 'cls',
+  signaturePrefix: 'embed',
+  queryPrefix: 'Represent the query for retrieving supporting documents: ',
+  documentPrefix: 'Represent the document for retrieval: ',
+})
+
+export const nemotronEmbedAdapter = makeEmbeddingAdapter({
+  modelId: 'nemotron-3-embed',
+  name: 'Nemotron-3-Embed-1B',
+  description: 'Multilingual 2048-dim embedding model. Mean pooling and L2 normalization are inside the graph; reports the cosine similarity of two texts.',
+  tags: ['text', 'embedding'],
+  base: 'https://huggingface.co/litert-community/Nemotron-3-Embed-1B/resolve/main',
+  file: 'Nemotron-3-Embed-1B_wi8fc.tflite',
+  signatures: [64, 128, 256, 512],
+  dim: 2048,
+  pool: 'cls',
+  signaturePrefix: 'embed',
+  queryPrefix: 'query: ',
+  documentPrefix: 'passage: ',
+})
+
+export const harrierEmbedAdapter = makeEmbeddingAdapter({
+  modelId: 'harrier-oss',
+  name: 'harrier-oss-v1-0.6b',
+  description: 'Multilingual 1024-dim embedding model. Last-token pooling and L2 normalization are inside the graph; reports the cosine similarity of two texts.',
+  tags: ['text', 'embedding'],
+  base: 'https://huggingface.co/litert-community/harrier-oss-v1-0.6b/resolve/main',
+  file: 'harrier-oss-v1-0.6b_wi8fc.tflite',
+  signatures: [64, 128, 256, 512],
+  dim: 1024,
+  pool: 'cls',
+  signaturePrefix: 'embed',
+  queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ',
+})
+
+export const textAdapters: ModelAdapter[] = [
+  mxbaiColbertAdapter,
+  lfm2EncoderAdapter,
+  graniteEmbedAdapter,
+  lfm2EmbeddingAdapter,
+  voyageEmbedAdapter,
+  nemotronEmbedAdapter,
+  harrierEmbedAdapter,
+]
