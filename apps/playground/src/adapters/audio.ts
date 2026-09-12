@@ -281,6 +281,62 @@ export const wav2vec2Adapter: ModelAdapter = {
   },
 }
 
+const W2V2_KWS_FRONTEND_PATH = 'https://huggingface.co/litert-community/wav2vec2-keyword-spotting/resolve/main/w2v2_frontend_fp16.tflite'
+const W2V2_KWS_HEAD_PATH = 'https://huggingface.co/litert-community/wav2vec2-keyword-spotting/resolve/main/w2v2_head_fp16.tflite'
+const W2V2_KWS_SAMPLES = 16000 // 1 s @ 16 kHz
+const W2V2_KWS_LABELS = ['yes', 'no', 'up', 'down', 'left', 'right', 'on', 'off', 'stop', 'go', '_unknown_', '_silence_']
+
+export const wav2vec2KeywordAdapter: ModelAdapter = {
+  modelId: 'wav2vec2-kws',
+  metadata: {
+    name: 'wav2vec2 Keyword Spotting',
+    description: 'Speech-Commands keyword spotting, raw 16 kHz waveform straight into the 1D-conv frontend (no FFT). Two GPU graphs: frontend → head.',
+    modelPath: W2V2_KWS_FRONTEND_PATH,
+    tags: ['audio', 'classification', 'keyword-spotting', 'wav2vec2'],
+  },
+  graphs: [{ name: 'head', modelPath: W2V2_KWS_HEAD_PATH }],
+  inputSpecs: [{
+    name: 'audio',
+    dtype: 'float32',
+    shape: [1, W2V2_KWS_SAMPLES],
+    description: 'Mono PCM at 16 kHz in [-1, 1]; padded/truncated to 1 second',
+  }],
+  outputSpecs: [{
+    name: 'keyword',
+    dtype: 'float32',
+    shape: [],
+    description: 'Keyword class scores',
+  }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const raw = values['audio']
+    const audio = raw instanceof Float32Array ? raw : flatten(raw ?? [])
+    if (!audio.length) throw new Error('No audio provided')
+    const input = new Float32Array(W2V2_KWS_SAMPLES)
+    input.set(audio.subarray(0, Math.min(audio.length, W2V2_KWS_SAMPLES)))
+
+    const frontend = await ctx.predict('main', { input: ctx.createTensor(input, [1, W2V2_KWS_SAMPLES]) })
+    const features = Object.values(frontend)[0]
+    const head = await ctx.predict('head', { input: features })
+    const logits = (await Object.values(head)[0].data()) as Float32Array
+
+    let max = -Infinity
+    for (let i = 0; i < logits.length; i++) if (logits[i] > max) max = logits[i]
+    const probs = Array.from(logits, value => Math.exp(value - max))
+    const sum = probs.reduce((total, value) => total + value, 0)
+    const ranked = probs
+      .map((value, index) => ({ label: W2V2_KWS_LABELS[index] ?? `#${index}`, p: value / sum }))
+      .sort((a, b) => b.p - a.p)
+
+    return { keyword: ranked.map(entry => `${(entry.p * 100).toFixed(1)}%  ${entry.label}`).join('\n') }
+  },
+}
+
 const PANNS_PATH = 'https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/cnn14_audioset_fp16.tflite'
 const PANNS_MEL_PATH = 'https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/mel_basis.bin'
 const PANNS_LABELS_PATH = 'https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/audioset_labels.txt'
@@ -549,4 +605,4 @@ export const graniteSpeechAdapter: ModelAdapter = {
   },
 }
 
-export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter, pannsAdapter, basicPitchAdapter, graniteSpeechAdapter]
+export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter, wav2vec2KeywordAdapter, pannsAdapter, basicPitchAdapter, graniteSpeechAdapter]
