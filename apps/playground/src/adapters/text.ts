@@ -1,5 +1,5 @@
 import type { InferenceContext, ModelAdapter } from './types'
-import { loadHfTokenizer } from '../hfTokenizer'
+import { loadHfTokenizer, type HfTokenizer } from '../hfTokenizer'
 
 // ColBERT skiplist: 32 ASCII punctuation tokens contribute no document signal.
 const SKIPLIST = new Set('!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'.split(''))
@@ -514,6 +514,97 @@ export const piiDetectorAdapter: ModelAdapter = {
   },
 }
 
+const LINT_BASE = 'https://huggingface.co/litert-community/LFM2.5-Encoder-350M-Policy-Linter/resolve/main'
+const LINT_SIGNATURES = [128, 512]
+const LINT_MAX_RULES = 8
+
+/**
+ * Token spans of each rule inside the prompt. ponytail: derived from cumulative
+ * prefix encodings rather than char offsets — the tokenizer isolates `- ` and
+ * `\n` into their own chunks, so no BPE merge crosses a rule boundary.
+ */
+function ruleTokenSpans(tokenizer: HfTokenizer, prefix: string, rules: string[]): [number, number][] {
+  const spans: [number, number][] = []
+  let pos = 'Policy:\n'.length
+  for (const rule of rules) {
+    const start = pos + 2
+    const end = start + rule.length
+    spans.push([tokenizer.encode(prefix.slice(0, start)).length, tokenizer.encode(prefix.slice(0, end)).length])
+    pos = end + 1
+  }
+  return spans
+}
+
+export const policyLinterAdapter: ModelAdapter = {
+  modelId: 'lfm2.5-policy-linter',
+  metadata: {
+    name: 'LFM2.5-Encoder-350M-Policy-Linter',
+    description: 'Zero-shot policy linting: scores every document token against up to 8 plain-language rules in one pass.',
+    modelPath: `${LINT_BASE}/LFM2.5-Encoder-350M-Policy-Linter_wi8fc.tflite`,
+    tags: ['text', 'policy', 'compliance'],
+  },
+  inputSpecs: [
+    { name: 'text', dtype: 'string', shape: [], description: 'Document to lint', constraints: { text: true } },
+    { name: 'rules', dtype: 'string', shape: [], description: 'Policy rules, one per line (up to 8)', constraints: { text: true } },
+  ],
+  outputSpecs: [{ name: 'violations', dtype: 'float32', shape: [], description: 'Flagged spans per rule' }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const text = String(values['text'] ?? '').trim()
+    const rules = String(values['rules'] ?? '')
+      .split('\n')
+      .map((rule) => rule.trim())
+      .filter(Boolean)
+      .slice(0, LINT_MAX_RULES)
+    if (!text) throw new Error('Provide a document to lint')
+    if (!rules.length) throw new Error('Provide at least one rule')
+
+    const tokenizer = await loadHfTokenizer(`${LINT_BASE}/tokenizer.json`)
+    const prefix = `Policy:\n${rules.map((rule) => `- ${rule}`).join('\n')}\n\nText:\n`
+    const ids = tokenizer.encode(prefix + text)
+    if (ids.length > LINT_SIGNATURES[LINT_SIGNATURES.length - 1]) throw new Error('Document and rules exceed 512 tokens')
+    const size = smallestSignature(ids.length, LINT_SIGNATURES)
+
+    const rulePool = new Float32Array(LINT_MAX_RULES * size)
+    for (const [r, [start, end]] of ruleTokenSpans(tokenizer, prefix, rules).entries()) {
+      const n = end - start
+      if (n <= 0) continue
+      for (let i = start; i < end; i++) rulePool[r * size + i] = 1 / n
+    }
+
+    const inputIds = new Int32Array(size)
+    inputIds.set(ids)
+    const mask = new Int32Array(size)
+    for (let i = 0; i < ids.length; i++) mask[i] = 1
+
+    const result = await ctx.predict(
+      'main',
+      {
+        input_ids: ctx.createTensor(inputIds, [1, size]),
+        attention_mask: ctx.createTensor(mask, [1, size]),
+        rule_pool: ctx.createTensor(rulePool, [1, LINT_MAX_RULES, size]),
+      },
+      `lint_${size}`,
+    )
+    const scores = (await Object.values(result)[0].data()) as Float32Array
+
+    const docStart = tokenizer.encode(prefix).length
+    const lines = rules.map((rule, r) => {
+      const flagged: string[] = []
+      for (let t = docStart; t < ids.length; t++) {
+        if (1 / (1 + Math.exp(-scores[t * LINT_MAX_RULES + r])) > 0.5) flagged.push(readableToken(tokenizer.tokenOf(ids[t]) ?? ''))
+      }
+      return `rule: ${rule}\n  flagged: ${flagged.join('').trim() || '(none)'}`
+    })
+    return { violations: lines.join('\n') }
+  },
+}
+
 export const textAdapters: ModelAdapter[] = [
   mxbaiColbertAdapter,
   mlateonAdapter,
@@ -528,4 +619,5 @@ export const textAdapters: ModelAdapter[] = [
   gigaEmbedAdapter,
   ettinRerankerAdapter,
   piiDetectorAdapter,
+  policyLinterAdapter,
 ]
