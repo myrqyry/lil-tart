@@ -112,4 +112,172 @@ export const moonshineAdapter: ModelAdapter = {
   },
 }
 
-export const audioAdapters: ModelAdapter[] = [moonshineAdapter]
+const CREPE_PATH = 'https://huggingface.co/litert-community/CREPE-pitch-LiteRT/resolve/main/crepe_full_fp16.tflite'
+const CREPE_FRAME = 1024
+const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+// torchcrepe weighted_argmax decode: peak bin ± 4, activation-weighted average.
+function decodePitch(activation: Float32Array): { hz: number; midi: number; confidence: number } {
+  let peak = 0
+  let best = -Infinity
+  for (let i = 0; i < activation.length; i++) {
+    if (activation[i] > best) { best = activation[i]; peak = i }
+  }
+  const start = Math.max(0, peak - 4)
+  const end = Math.min(activation.length, peak + 5)
+  let weight = 0
+  let weighted = 0
+  for (let i = start; i < end; i++) { weight += activation[i]; weighted += activation[i] * i }
+  const cents = 20 * (weighted / weight) + 1997.3794084376191
+  const hz = 10 * 2 ** (cents / 1200)
+  return { hz, midi: 69 + 12 * Math.log2(hz / 440), confidence: activation[peak] }
+}
+
+function formatPitch(hz: number, midi: number): string {
+  const rounded = Math.round(midi)
+  return `${hz.toFixed(1)} Hz · ${NOTE_NAMES[((rounded % 12) + 12) % 12]}${Math.floor(rounded / 12) - 1} ${Math.round((midi - rounded) * 100) >= 0 ? '+' : ''}${Math.round((midi - rounded) * 100)} cents`
+}
+
+export const crepeAdapter: ModelAdapter = {
+  modelId: 'crepe-pitch',
+  metadata: {
+    name: 'CREPE — Pitch Detection',
+    description: 'Monophonic f0 over 1024-sample (16 kHz) frames → 360 pitch-bin activations, decoded host-side to Hz and nearest note.',
+    modelPath: CREPE_PATH,
+    tags: ['audio', 'pitch', 'tuner', 'crepe'],
+  },
+  inputSpecs: [{
+    name: 'audio',
+    dtype: 'float32',
+    shape: [1, CREPE_FRAME],
+    description: 'Mono PCM at 16 kHz in [-1, 1]; split into 1024-sample frames',
+  }],
+  outputSpecs: [{
+    name: 'pitch',
+    dtype: 'float32',
+    shape: [],
+    description: 'Median detected pitch (Hz + nearest note)',
+  }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const raw = values['audio']
+    const audio = raw instanceof Float32Array ? raw : flatten(raw ?? [])
+    if (!audio.length) throw new Error('No audio provided')
+    const frames = windowsOf(audio, CREPE_FRAME).slice(0, 256) // ponytail: cap at 256 frames (~16 s); add overlap when pitch tracking needs smoothing
+    const hz: number[] = []
+    const candidates: { hz: number; midi: number; confidence: number }[] = []
+    for (const frame of frames) {
+      const input = new Float32Array(CREPE_FRAME)
+      input.set(frame.subarray(0, CREPE_FRAME))
+      let mean = 0
+      for (const value of input) mean += value
+      mean /= CREPE_FRAME
+      let variance = 0
+      for (const value of input) variance += (value - mean) ** 2
+      const std = Math.max(Math.sqrt(variance / CREPE_FRAME), 1e-10)
+      for (let i = 0; i < CREPE_FRAME; i++) input[i] = (input[i] - mean) / std
+      const out = await ctx.predict('main', { input: ctx.createTensor(input, [1, CREPE_FRAME]) })
+      const activation = (await Object.values(out)[0].data()) as Float32Array
+      const decoded = decodePitch(activation)
+      hz.push(Number(decoded.hz.toFixed(1)))
+      if (decoded.confidence > 0.5) candidates.push(decoded)
+    }
+    if (!candidates.length) return { pitch: 'No clear pitch detected', hz }
+    candidates.sort((a, b) => a.hz - b.hz)
+    const median = candidates[Math.floor(candidates.length / 2)]
+    return { pitch: formatPitch(median.hz, median.midi), hz }
+  },
+}
+
+const W2V2_FRONTEND_PATH = 'https://huggingface.co/litert-community/wav2vec2-base-960h-LiteRT/resolve/main/w2v2_asr_frontend_fp16.tflite'
+const W2V2_HEAD_PATH = 'https://huggingface.co/litert-community/wav2vec2-base-960h-LiteRT/resolve/main/w2v2_asr_head_fp16.tflite'
+const W2V2_TOKENS_PATH = 'https://huggingface.co/litert-community/wav2vec2-base-960h-LiteRT/resolve/main/tokens.txt'
+const W2V2_SAMPLES = 256000 // 16 s @ 16 kHz
+
+let w2v2TokensPromise: Promise<string[]> | null = null
+
+function loadW2V2Tokens(): Promise<string[]> {
+  if (!w2v2TokensPromise) {
+    w2v2TokensPromise = fetch(W2V2_TOKENS_PATH)
+      .then(response => {
+        if (!response.ok) throw new Error(`tokens.txt ${response.status}`)
+        return response.text()
+      })
+      .then(text => text.split('\n').map(line => line.replace(/\r$/, '')))
+      .catch(cause => {
+        w2v2TokensPromise = null
+        throw cause
+      })
+  }
+  return w2v2TokensPromise
+}
+
+export const wav2vec2Adapter: ModelAdapter = {
+  modelId: 'wav2vec2-960h',
+  metadata: {
+    name: 'wav2vec2-base-960h — Speech Recognition',
+    description: 'Character-level CTC ASR, raw 16 kHz waveform straight into the 1D-conv frontend (no FFT). Two GPU graphs: frontend → head.',
+    modelPath: W2V2_FRONTEND_PATH,
+    tags: ['audio', 'asr', 'ctc', 'wav2vec2'],
+  },
+  graphs: [{ name: 'head', modelPath: W2V2_HEAD_PATH }],
+  inputSpecs: [{
+    name: 'audio',
+    dtype: 'float32',
+    shape: [1, W2V2_SAMPLES],
+    description: 'Mono PCM at 16 kHz in [-1, 1]; padded/truncated to 16 seconds',
+  }],
+  outputSpecs: [{
+    name: 'text',
+    dtype: 'float32',
+    shape: [],
+    description: 'Transcribed text',
+  }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const raw = values['audio']
+    const audio = raw instanceof Float32Array ? raw : flatten(raw ?? [])
+    if (!audio.length) throw new Error('No audio provided')
+    const samples = Math.min(audio.length, W2V2_SAMPLES)
+    const input = new Float32Array(W2V2_SAMPLES)
+    input.set(audio.subarray(0, samples))
+
+    const frontend = await ctx.predict('main', { input: ctx.createTensor(input, [1, W2V2_SAMPLES]) })
+    const features = Object.values(frontend)[0]
+    const head = await ctx.predict('head', { input: features })
+    const logits = (await Object.values(head)[0].data()) as Float32Array
+
+    // Conv feature-extractor length formula from the reference (kernels/strides).
+    let length = samples
+    for (const [kernel, stride] of [[10, 5], [3, 2], [3, 2], [3, 2], [3, 2], [2, 2], [2, 2]]) {
+      length = Math.floor((length - kernel) / stride) + 1
+    }
+
+    const tokens = await loadW2V2Tokens()
+    const out: string[] = []
+    let previous = -1
+    for (let t = 0; t < length; t++) {
+      let best = 0
+      let bestValue = -Infinity
+      for (let c = 0; c < 32; c++) {
+        const value = logits[t * 32 + c]
+        if (value > bestValue) { bestValue = value; best = c }
+      }
+      if (best !== previous && best !== 0) out.push(tokens[best] ?? '')
+      previous = best
+    }
+    return { text: out.join('').replace(/\|/g, ' ').trim() }
+  },
+}
+
+export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter]
