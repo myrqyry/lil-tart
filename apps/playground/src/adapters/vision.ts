@@ -592,6 +592,91 @@ export const siglip2Adapter: ModelAdapter = {
   },
 }
 
+function buildNchwRgbOnesTensor(imageData: ImageData, w: number, h: number): Tensor {
+  const { data } = imageData
+  const plane = w * h
+  const out = new Float32Array(4 * plane)
+  for (let i = 0; i < plane; i++) {
+    const o = i * 4
+    out[i] = data[o] / 127.5 - 1
+    out[plane + i] = data[o + 1] / 127.5 - 1
+    out[2 * plane + i] = data[o + 2] / 127.5 - 1
+    out[3 * plane + i] = 1
+  }
+  return new Tensor(out, [1, 4, h, w])
+}
+
+export const cpgaAdapter: ModelAdapter = {
+  modelId: 'cpga-net-lowlight',
+  metadata: { name: 'CPGA-Net — Low-Light Enhancement', description: 'Low-light image enhancement, RGB [0,1]', modelPath: 'https://huggingface.co/litert-community/CPGA-Net-LowLight-LiteRT/resolve/main/cpga_fp16.tflite', tags: ['vision', 'restoration'] },
+  inputSpecs: [inpSpec('image', [1, 3, 256, 256], 'float32', 'RGB [0,1] NCHW')],
+  outputSpecs: [outSpec('output', [1, 3, 256, 256], 'float32', 'Enhanced RGB [0,1]')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for cpga-net-lowlight')
+    const resized = resizeImageData(imageData, 256, 256)
+    return { image: normalizeAndFormatImageData(resized, [1, 3, 256, 256], { dataFormat: 'NCHW', normalization: '0-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: await nchwToImageData(data, 256, 256) }
+  },
+}
+
+export const peCoreAdapter: ModelAdapter = {
+  modelId: 'pe-core-base',
+  metadata: { name: 'PE-Core — Image Embedding', description: 'L2-normalized 1024-d image embedding', modelPath: 'https://huggingface.co/litert-community/PE-Core-base-patch16-224/resolve/main/pe_core_base_224_fp16.tflite', tags: ['vision', 'embedding'] },
+  inputSpecs: [inpSpec('image', [1, 3, 224, 224], 'float32', 'RGB [-1,1] NCHW')],
+  outputSpecs: [outSpec('output', [1, 1024], 'float32', 'L2-normalized embedding')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for pe-core-base')
+    const resized = resizeImageData(imageData, 224, 224)
+    return { image: normalizeAndFormatImageData(resized, [1, 3, 224, 224], { dataFormat: 'NCHW', normalization: '-1-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: Array.from(data) }
+  },
+}
+
+export const clothSegAdapter: ModelAdapter = {
+  modelId: 'cloth-segmentation',
+  metadata: { name: 'Cloth Segmentation (U²-Net)', description: '4-class clothing parsing', modelPath: 'https://huggingface.co/litert-community/Cloth-Segmentation-U2Net-LiteRT/resolve/main/clothseg.tflite', tags: ['vision', 'segmentation'] },
+  inputSpecs: [inpSpec('image', [1, 3, 768, 768], 'float32', 'RGB [-1,1] NCHW')],
+  outputSpecs: [outSpec('output', [1, 4, 768, 768], 'float32', '4-class logits')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for cloth-segmentation')
+    const resized = resizeImageData(imageData, 768, 768)
+    return { image: normalizeAndFormatImageData(resized, [1, 3, 768, 768], { dataFormat: 'NCHW', normalization: '-1-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: argmaxColorize(data, 4, 768, 768) }
+  },
+}
+
+export const mlsdAdapter: ModelAdapter = {
+  modelId: 'm-lsd-tiny',
+  metadata: { name: 'M-LSD-tiny — Line Detection', description: 'Line-segment center heatmap', modelPath: 'https://huggingface.co/litert-community/M-LSD-tiny-LiteRT/resolve/main/mlsd_fp16.tflite', tags: ['vision', 'line-detection'] },
+  inputSpecs: [inpSpec('image', [1, 4, 512, 512], 'float32', 'RGB + ones channel, x/127.5-1, NCHW')],
+  outputSpecs: [outSpec('tpMap', [1, 9, 256, 256], 'float32', 'ch0 center, ch1-4 displacement')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for m-lsd-tiny')
+    const resized = resizeImageData(imageData, 512, 512)
+    return { image: buildNchwRgbOnesTensor(resized, 512, 512) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'tpMap').data() as Float32Array
+    const plane = 256 * 256
+    const center = new Float32Array(plane)
+    for (let i = 0; i < plane; i++) center[i] = 1 / (1 + Math.exp(-data[i]))
+    return { heatmap: maskToImageData(center, 256, 256) }
+  },
+}
+
 export const visionAdapters: ModelAdapter[] = [
   headpose6drepnetAdapter,
   yunetAdapter,
@@ -614,5 +699,9 @@ export const visionAdapters: ModelAdapter[] = [
   nafnetGoproAdapter,
   gfpganAdapter,
   siglip2Adapter,
+  cpgaAdapter,
+  peCoreAdapter,
+  clothSegAdapter,
+  mlsdAdapter,
   ...styleAdapters,
 ]
