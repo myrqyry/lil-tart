@@ -31,7 +31,9 @@ export class HfTokenizer {
   private cache = new Map<string, number[]>()
   private normalizer: HfNode | null
   private preTokenizer: HfNode | null
-  private postProcessor: HfNode | null
+  private byteLevel: boolean
+  private prefixSpace: boolean
+  private template: HfNode | null
   private unkId: number
 
   constructor(json: HfTokenizerJson) {
@@ -44,8 +46,14 @@ export class HfTokenizer {
     for (const token of json.added_tokens ?? []) this.added.set(token.content, token.id)
     this.normalizer = json.normalizer ?? null
     this.preTokenizer = json.pre_tokenizer ?? null
-    this.postProcessor = json.post_processor ?? null
-    const unk = json.post_processor?.special_tokens?.['[UNK]']?.ids?.[0] ?? (json.model.unk_token ? this.vocab[json.model.unk_token] : undefined)
+    this.byteLevel = usesByteLevel(this.preTokenizer)
+    const info = postProcessorInfo(json.post_processor ?? null)
+    this.prefixSpace = info.prefixSpace
+    this.template = info.template
+    const unk =
+      json.post_processor?.special_tokens?.['[UNK]']?.ids?.[0] ??
+      (json.model.unk_token ? this.vocab[json.model.unk_token] : undefined) ??
+      this.added.get('<unk>')
     this.unkId = unk ?? 0
   }
 
@@ -104,20 +112,23 @@ export class HfTokenizer {
         ids.push(special)
         continue
       }
-      let word = ''
-      for (const byte of new TextEncoder().encode(piece)) word += BYTE_TO_UNICODE[byte]
+      let word = piece
+      if (this.byteLevel) {
+        word = ''
+        for (const byte of new TextEncoder().encode(piece)) word += BYTE_TO_UNICODE[byte]
+      }
       ids.push(...this.bpe(word))
     }
     return ids
   }
 
   encode(text: string, options: HfEncodeOptions = {}): number[] {
-    let ids = this.bodyIds(text)
+    let ids = this.bodyIds(this.prefixSpace ? ` ${text}` : text)
     if (options.maxLength !== undefined) {
-      const specials = countTemplateSpecials(this.postProcessor)
+      const specials = countTemplateSpecials(this.template)
       ids = ids.slice(0, Math.max(0, options.maxLength - specials))
     }
-    const out = applyPostProcessor(this.postProcessor, ids)
+    const out = applyPostProcessor(this.template, ids)
     if (options.length !== undefined) {
       while (out.length < options.length) out.push(options.padId ?? 0)
     }
@@ -134,8 +145,12 @@ function applyNormalizer(node: HfNode | null, text: string): string {
       return text.normalize('NFD')
     case 'Lowercase':
       return text.toLowerCase()
-    case 'Replace':
-      return text.replace(new RegExp(node.pattern, 'gu'), node.content)
+    case 'Replace': {
+      const pattern = node.pattern
+      if (typeof pattern === 'string') return text.split(pattern).join(node.content)
+      if (pattern?.String !== undefined) return text.split(pattern.String).join(node.content)
+      return text.replace(new RegExp(pattern.Regex, 'gu'), node.content)
+    }
     case 'Sequence':
       return (node.normalizers as HfNode[]).reduce((acc, n) => applyNormalizer(n, acc), text)
     default:
@@ -153,9 +168,74 @@ function applyPreTokenizer(node: HfNode | null, text: string): string[] {
     }
     case 'Sequence':
       return (node.pretokenizers as HfNode[]).reduce((acc, n) => acc.flatMap((piece) => applyPreTokenizer(n, piece)), [text])
+    case 'Split': {
+      const behavior = node.behavior ?? 'Removed'
+      const pattern = node.pattern
+      if (pattern?.String !== undefined) {
+        const parts = text.split(pattern.String)
+        if (node.invert) return [pattern.String]
+        if (behavior === 'Removed') return parts.filter((part) => part.length > 0)
+        if (behavior === 'MergedWithPrevious') return parts.map((part, i) => (i < parts.length - 1 ? part + pattern.String : part)).filter((part) => part.length > 0)
+        if (behavior === 'Isolated') {
+          const out: string[] = []
+          parts.forEach((part, i) => {
+            if (part) out.push(part)
+            if (i < parts.length - 1) out.push(pattern.String)
+          })
+          return out
+        }
+        throw new Error(`hfTokenizer: unsupported Split behavior "${behavior}"`)
+      }
+      // ponytail: JS has no inline (?i:...) groups — hoist the flag globally; safe because only the
+      // contraction alternative is case-sensitive.
+      const flags = /\(\?i:/.test(pattern.Regex) ? 'giu' : 'gu'
+      const regex = new RegExp(pattern.Regex.replace(/\(\?i:/g, '(?:'), flags)
+      const matches = [...text.matchAll(regex)]
+      if (node.invert) return matches.map((m) => m[0])
+      const out: string[] = []
+      let last = 0
+      for (const match of matches) {
+        const gap = text.slice(last, match.index)
+        if (gap) out.push(gap)
+        if (behavior === 'Isolated') out.push(match[0])
+        else if (behavior === 'MergedWithPrevious') {
+          if (out.length) out[out.length - 1] += match[0]
+          else out.push(match[0])
+        } else if (behavior !== 'Removed') throw new Error(`hfTokenizer: unsupported Split behavior "${behavior}"`)
+        last = match.index + match[0].length
+      }
+      const tail = text.slice(last)
+      if (tail) out.push(tail)
+      return out
+    }
     default:
       throw new Error(`hfTokenizer: unsupported pre_tokenizer "${node.type}"`)
   }
+}
+
+function usesByteLevel(node: HfNode | null): boolean {
+  if (!node) return false
+  if (node.type === 'ByteLevel') return true
+  if (node.type === 'Sequence') return (node.pretokenizers as HfNode[]).some(usesByteLevel)
+  return false
+}
+
+/** Flattens a post_processor into the TemplateProcessing node plus any ByteLevel prefix-space request. */
+function postProcessorInfo(node: HfNode | null): { prefixSpace: boolean; template: HfNode | null } {
+  if (!node) return { prefixSpace: false, template: null }
+  if (node.type === 'ByteLevel') return { prefixSpace: Boolean(node.add_prefix_space), template: null }
+  if (node.type === 'TemplateProcessing') return { prefixSpace: false, template: node }
+  if (node.type === 'Sequence') {
+    let prefixSpace = false
+    let template: HfNode | null = null
+    for (const child of node.processors as HfNode[]) {
+      const info = postProcessorInfo(child)
+      prefixSpace ||= info.prefixSpace
+      template = info.template ?? template
+    }
+    return { prefixSpace, template }
+  }
+  throw new Error(`hfTokenizer: unsupported post_processor "${node.type}"`)
 }
 
 function countTemplateSpecials(node: HfNode | null): number {

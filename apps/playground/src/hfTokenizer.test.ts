@@ -40,3 +40,62 @@ describe('HfTokenizer', () => {
     expect(() => broken.encode('ab')).toThrow(/unsupported normalizer/)
   })
 })
+
+describe('HfTokenizer (granite-style: literal Replace + Split)', () => {
+  const granite = new HfTokenizer({
+    normalizer: { type: 'Replace', pattern: { String: ' ' }, content: '▁' },
+    pre_tokenizer: { type: 'Split', pattern: { String: ' ' }, behavior: 'MergedWithPrevious', invert: false },
+    model: { type: 'BPE', vocab: { '▁': 20, a: 10, b: 11, ab: 12, '▁ab': 21 }, merges: [['a', 'b'], ['▁', 'ab']] },
+    post_processor: {
+      type: 'TemplateProcessing',
+      single: [{ SpecialToken: { id: '<bos>' } }, { Sequence: { id: 'A' } }],
+      special_tokens: { '<bos>': { ids: [2] } },
+    },
+  })
+
+  it('does not byte-map when the pre-tokenizer has no ByteLevel node', () => {
+    expect(granite.encode('ab')).toEqual([2, 12])
+  })
+
+  it('replaces spaces with the sentinel before BPE', () => {
+    expect(granite.encode('a b')).toEqual([2, 10, 20, 11])
+  })
+})
+
+describe('HfTokenizer (LFM-style: regex Split + post_processor Sequence)', () => {
+  const lfm = new HfTokenizer({
+    normalizer: null,
+    pre_tokenizer: {
+      type: 'Sequence',
+      pretokenizers: [
+        { type: 'Split', pattern: { Regex: '\\s+|\\p{L}+' }, behavior: 'Isolated', invert: false },
+        { type: 'ByteLevel', add_prefix_space: false, use_regex: false },
+      ],
+    },
+    model: { type: 'BPE', vocab: { Ġ: 13, a: 10, b: 11, ab: 12 }, merges: [['a', 'b']] },
+    post_processor: {
+      type: 'Sequence',
+      processors: [
+        { type: 'ByteLevel', add_prefix_space: true, use_regex: true },
+        {
+          type: 'TemplateProcessing',
+          single: [{ SpecialToken: { id: '<s>' } }, { Sequence: { id: 'A' } }],
+          special_tokens: { '<s>': { ids: [1] } },
+        },
+      ],
+    },
+  })
+
+  it('splits on the regex, byte-maps, and honors the post_processor prefix space', () => {
+    expect(lfm.encode('ab')).toEqual([1, 13, 12])
+  })
+
+  it('accepts an inline (?i:) group that JavaScript cannot express', () => {
+    const ci = new HfTokenizer({
+      model: { type: 'BPE', vocab: { "'": 7, S: 8, s: 9, "'S": 6, "'s": 5 }, merges: [["'", 'S'], ["'", 's']] },
+      pre_tokenizer: { type: 'Split', pattern: { Regex: "(?i:'s|\\p{L}+)" }, behavior: 'Isolated', invert: false },
+    })
+    expect(ci.encode("'S")).toEqual([6])
+    expect(ci.encode("'s")).toEqual([5])
+  })
+})
