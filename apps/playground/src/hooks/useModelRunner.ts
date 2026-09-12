@@ -9,7 +9,7 @@ import {
   type ManagedLiteRtRuntimeContext,
 } from '@litert-playground/runtime-litert'
 import type { Tensor } from '@litertjs/core'
-import type { ModelAdapter, TensorSpec } from '../adapters/types'
+import type { InferenceContext, ModelAdapter, TensorSpec } from '../adapters/types'
 
 export type Accelerator = BackendPreference
 
@@ -127,16 +127,22 @@ export function useModelRunner(): UseModelRunnerReturn {
     try {
       const runtime = await ensureRuntime()
       const previous = adapterRef.current
-      if (previous) runtime.liteRt.disposeModel(previous.metadata.modelPath)
+      if (previous) {
+        runtime.liteRt.disposeModel(previous.metadata.modelPath)
+        previous.graphs?.forEach((graph) => runtime.liteRt.disposeModel(graph.modelPath))
+      }
 
-      await runtime.liteRt.loadModel(adapter.metadata.modelPath, {
-        accelerator: target,
-        signal: controller.signal,
-        webNNOptions: target === 'webnn' || target === 'auto'
-          ? { devicePreference: 'npu', powerPreference: 'high-performance' }
-          : undefined,
-        onProgress: (progress) => setDownloadProgress(progress),
-      })
+      const graphPaths = [adapter.metadata.modelPath, ...(adapter.graphs ?? []).map((graph) => graph.modelPath)]
+      for (const modelPath of graphPaths) {
+        await runtime.liteRt.loadModel(modelPath, {
+          accelerator: target,
+          signal: controller.signal,
+          webNNOptions: target === 'webnn' || target === 'auto'
+            ? { devicePreference: 'npu', powerPreference: 'high-performance' }
+            : undefined,
+          onProgress: (progress) => setDownloadProgress(progress),
+        })
+      }
 
       if (requestId !== requestIdRef.current || controller.signal.aborted) return
       adapterRef.current = adapter
@@ -166,41 +172,64 @@ export function useModelRunner(): UseModelRunnerReturn {
     setError(null)
     try {
       const runtime = await ensureRuntime()
-      let inputs = adapter.prepareInputs(values)
-      if (!Object.keys(inputs).length && Object.keys(values).length) {
-        inputs = {}
-        for (const spec of adapter.inputSpecs) {
-          const data = typedInput(values[spec.name])
-          if (data) inputs[spec.name] = runtime.liteRt.createTensor(data, spec.shape)
+      const webNNOptions = accelerator === 'webnn' || accelerator === 'auto'
+        ? { devicePreference: 'npu' as const, powerPreference: 'high-performance' as const }
+        : undefined
+
+      let parsed: Record<string, unknown>
+      if (adapter.run) {
+        const ctx: InferenceContext = {
+          predict: async (graph, inputs) => {
+            const graphPath = graph === 'main'
+              ? adapter.metadata.modelPath
+              : adapter.graphs?.find((entry) => entry.name === graph)?.modelPath
+            if (!graphPath) throw new Error(`Unknown graph '${graph}' for ${adapter.modelId}`)
+            const result = await runtime.liteRt.predict(graphPath, inputs, {
+              accelerator,
+              label: `playground:${adapter.modelId}:${graph}`,
+              webNNOptions,
+            })
+            return normalizeOutputs(result, [])
+          },
+          createTensor: (data, shape) => runtime.liteRt.createTensor(data, shape),
         }
+        parsed = await adapter.run(values, ctx)
+      } else {
+        let inputs = adapter.prepareInputs(values)
+        if (!Object.keys(inputs).length && Object.keys(values).length) {
+          inputs = {}
+          for (const spec of adapter.inputSpecs) {
+            const data = typedInput(values[spec.name])
+            if (data) inputs[spec.name] = runtime.liteRt.createTensor(data, spec.shape)
+          }
+        }
+
+        const result = await runtime.liteRt.predict(adapter.metadata.modelPath, inputs, {
+          accelerator,
+          label: `playground:${adapter.modelId}`,
+          webNNOptions,
+        })
+        const outputRecord = normalizeOutputs(result, adapter.outputSpecs)
+        parsed = await adapter.parseOutputs(outputRecord)
+
+        const raw: Record<string, RawTensor> = {}
+        for (const spec of adapter.outputSpecs) {
+          const tensor = outputRecord[spec.name]
+          if (!tensor) continue
+          const data = await tensor.data()
+          raw[spec.name] = { data: new Float32Array(data), shape: spec.shape }
+        }
+        setOutputTensors(raw)
+        setOutputSpecs(adapter.outputSpecs)
+
+        Object.values(inputs).forEach((tensor) => {
+          const disposable = tensor as Tensor & { delete?: () => void }
+          disposable.delete?.()
+        })
       }
 
-      const result = await runtime.liteRt.predict(adapter.metadata.modelPath, inputs, {
-        accelerator,
-        label: `playground:${adapter.modelId}`,
-        webNNOptions: accelerator === 'webnn' || accelerator === 'auto'
-          ? { devicePreference: 'npu', powerPreference: 'high-performance' }
-          : undefined,
-      })
-      const outputRecord = normalizeOutputs(result, adapter.outputSpecs)
-      const parsed = await adapter.parseOutputs(outputRecord)
       setOutputs(parsed)
-
-      const raw: Record<string, RawTensor> = {}
-      for (const spec of adapter.outputSpecs) {
-        const tensor = outputRecord[spec.name]
-        if (!tensor) continue
-        const data = await tensor.data()
-        raw[spec.name] = { data: new Float32Array(data), shape: spec.shape }
-      }
-      setOutputTensors(raw)
-      setOutputSpecs(adapter.outputSpecs)
       refreshRuntimeState(runtime, adapter, accelerator)
-
-      Object.values(inputs).forEach((tensor) => {
-        const disposable = tensor as Tensor & { delete?: () => void }
-        disposable.delete?.()
-      })
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
