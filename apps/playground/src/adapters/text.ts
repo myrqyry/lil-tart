@@ -1,32 +1,49 @@
 import type { InferenceContext, ModelAdapter } from './types'
 import { loadHfTokenizer } from '../hfTokenizer'
 
-const MXBAI_BASE = 'https://huggingface.co/litert-community/mxbai-edge-colbert-v0-32m/resolve/main'
-const MXBAI_MODEL = `${MXBAI_BASE}/mxbai-edge-colbert-v0-32m_fp16.tflite`
-const MXBAI_TOKENIZER = `${MXBAI_BASE}/tokenizer.json`
-
-const Q_ID = 50368
-const D_ID = 50369
-const PAD_ID = 50284
-const SIGNATURES = [48, 128, 256, 512]
-const QUERY_MAX = 47
-const DOC_MAX = 511
-const DIM = 64
-
 // ColBERT skiplist: 32 ASCII punctuation tokens contribute no document signal.
 const SKIPLIST = new Set('!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'.split(''))
 
-function smallestSignature(length: number): number {
-  return SIGNATURES.find((size) => size >= length) ?? SIGNATURES[SIGNATURES.length - 1]
+interface LateInteractionConfig {
+  modelId: string
+  name: string
+  description: string
+  tags: string[]
+  base: string
+  file: string
+  signatures: number[]
+  dim: number
+  padId: number
+  queryMarker: number
+  documentMarker: number
+  queryMaxLength: number
+  documentMaxLength: number
+  lowercase?: boolean
+  skiplist?: boolean
+  /** Force every query through this signature (LFM2.5-ColBERT uses 32 for query expansion). */
+  querySize?: number
+  /** Keep all query vectors of the signature, including padded expansion positions. */
+  queryKeepAll?: boolean
 }
 
-/** Runs one ColBERT encode signature, returning the L2-normalized vectors for the real tokens. */
-async function encodeVectors(text: string, marker: number, maxLength: number, ctx: InferenceContext): Promise<Float32Array[]> {
-  const tokenizer = await loadHfTokenizer(MXBAI_TOKENIZER)
-  const base = tokenizer.encode(text.toLowerCase(), { maxLength })
+function smallestSignature(length: number, signatures: number[]): number {
+  return signatures.find((size) => size >= length) ?? signatures[signatures.length - 1]
+}
+
+/** Runs one ColBERT encode signature, returning the L2-normalized per-token vectors to score. */
+async function encodeVectors(
+  text: string,
+  marker: number,
+  maxLength: number,
+  ctx: InferenceContext,
+  config: LateInteractionConfig,
+  isQuery: boolean,
+): Promise<Float32Array[]> {
+  const tokenizer = await loadHfTokenizer(`${config.base}/tokenizer.json`)
+  const base = tokenizer.encode(config.lowercase ? text.toLowerCase() : text, { maxLength })
   const ids = [base[0], marker, ...base.slice(1)]
-  const size = smallestSignature(ids.length)
-  const inputIds = new Int32Array(size).fill(PAD_ID)
+  const size = isQuery && config.querySize ? config.querySize : smallestSignature(ids.length, config.signatures)
+  const inputIds = new Int32Array(size).fill(config.padId)
   inputIds.set(ids)
   const mask = new Int32Array(size)
   for (let i = 0; i < ids.length; i++) mask[i] = 1
@@ -37,23 +54,25 @@ async function encodeVectors(text: string, marker: number, maxLength: number, ct
     `encode_${size}`,
   )
   const data = (await Object.values(result)[0].data()) as Float32Array
+  const rows = isQuery && config.queryKeepAll ? size : ids.length
   const vectors: Float32Array[] = []
-  for (let row = 0; row < ids.length; row++) {
-    const vector = data.subarray(row * DIM, (row + 1) * DIM)
-    const token = tokenizer.tokenOf(ids[row])
-    if (token !== undefined && token.length === 1 && SKIPLIST.has(token)) continue
-    vectors.push(vector)
+  for (let row = 0; row < rows; row++) {
+    if (config.skiplist && row < ids.length) {
+      const token = tokenizer.tokenOf(ids[row])
+      if (token !== undefined && token.length === 1 && SKIPLIST.has(token)) continue
+    }
+    vectors.push(data.subarray(row * config.dim, (row + 1) * config.dim))
   }
   return vectors
 }
 
-function maxSim(query: Float32Array[], document: Float32Array[]): number {
+function maxSim(query: Float32Array[], document: Float32Array[], dim: number): number {
   let total = 0
   for (const q of query) {
     let best = -Infinity
     for (const d of document) {
       let dot = 0
-      for (let k = 0; k < DIM; k++) dot += q[k] * d[k]
+      for (let k = 0; k < dim; k++) dot += q[k] * d[k]
       if (dot > best) best = dot
     }
     total += best
@@ -61,30 +80,80 @@ function maxSim(query: Float32Array[], document: Float32Array[]): number {
   return total
 }
 
-export const mxbaiColbertAdapter: ModelAdapter = {
-  modelId: 'mxbai-colbert',
-  metadata: {
-    name: 'mxbai-edge-colbert-v0-32m',
-    description: 'Late-interaction (ColBERT) text reranker. Scores how relevant a document is to a query via MaxSim over per-token embeddings.',
-    modelPath: MXBAI_MODEL,
-    tags: ['text', 'retrieval', 'colbert'],
-  },
-  inputSpecs: [
-    { name: 'query', dtype: 'string', shape: [], description: 'Search query', constraints: { text: true } },
-    { name: 'document', dtype: 'string', shape: [], description: 'Passage to score against the query', constraints: { text: true } },
-  ],
-  outputSpecs: [{ name: 'score', dtype: 'float32', shape: [], description: 'MaxSim relevance score (higher is more relevant)' }],
-  prepareInputs: () => ({}),
-  parseOutputs: async () => ({}),
-  async run(values, ctx) {
-    const query = String(values.query ?? '').trim()
-    const document = String(values.document ?? '').trim()
-    if (!query || !document) throw new Error('Provide both a query and a document')
-    const queryVectors = await encodeVectors(query, Q_ID, QUERY_MAX, ctx)
-    const documentVectors = await encodeVectors(document, D_ID, DOC_MAX, ctx)
-    return { score: Number(maxSim(queryVectors, documentVectors).toFixed(4)) }
-  },
+function makeLateInteractionAdapter(config: LateInteractionConfig): ModelAdapter {
+  return {
+    modelId: config.modelId,
+    metadata: { name: config.name, description: config.description, modelPath: `${config.base}/${config.file}`, tags: config.tags },
+    inputSpecs: [
+      { name: 'query', dtype: 'string', shape: [], description: 'Search query', constraints: { text: true } },
+      { name: 'document', dtype: 'string', shape: [], description: 'Passage to score against the query', constraints: { text: true } },
+    ],
+    outputSpecs: [{ name: 'score', dtype: 'float32', shape: [], description: 'MaxSim relevance score (higher is more relevant)' }],
+    prepareInputs: () => ({}),
+    parseOutputs: async () => ({}),
+    async run(values, ctx) {
+      const query = String(values.query ?? '').trim()
+      const document = String(values.document ?? '').trim()
+      if (!query || !document) throw new Error('Provide both a query and a document')
+      const queryVectors = await encodeVectors(query, config.queryMarker, config.queryMaxLength, ctx, config, true)
+      const documentVectors = await encodeVectors(document, config.documentMarker, config.documentMaxLength, ctx, config, false)
+      return { score: Number(maxSim(queryVectors, documentVectors, config.dim).toFixed(4)) }
+    },
+  }
 }
+
+export const mxbaiColbertAdapter = makeLateInteractionAdapter({
+  modelId: 'mxbai-colbert',
+  name: 'mxbai-edge-colbert-v0-32m',
+  description: 'Late-interaction (ColBERT) text reranker. Scores how relevant a document is to a query via MaxSim over per-token embeddings.',
+  tags: ['text', 'retrieval', 'colbert'],
+  base: 'https://huggingface.co/litert-community/mxbai-edge-colbert-v0-32m/resolve/main',
+  file: 'mxbai-edge-colbert-v0-32m_fp16.tflite',
+  signatures: [48, 128, 256, 512],
+  dim: 64,
+  padId: 50284,
+  queryMarker: 50368,
+  documentMarker: 50369,
+  queryMaxLength: 47,
+  documentMaxLength: 511,
+  lowercase: true,
+  skiplist: true,
+})
+
+export const mlateonAdapter = makeLateInteractionAdapter({
+  modelId: 'mlateon',
+  name: 'mLateOn',
+  description: 'Multilingual late-interaction (ColBERT) retriever. 128-dim per-token vectors scored with MaxSim; no query expansion or skiplist.',
+  tags: ['text', 'retrieval', 'colbert'],
+  base: 'https://huggingface.co/litert-community/mLateOn/resolve/main',
+  file: 'mLateOn_wi8fc.tflite',
+  signatures: [32, 128, 256, 512],
+  dim: 128,
+  padId: 4,
+  queryMarker: 256000,
+  documentMarker: 256001,
+  queryMaxLength: 511,
+  documentMaxLength: 511,
+})
+
+export const lfmColbertAdapter = makeLateInteractionAdapter({
+  modelId: 'lfm2.5-colbert',
+  name: 'LFM2.5-ColBERT-350M',
+  description: 'Multilingual late-interaction retriever with query expansion. Queries keep all 32 vectors; documents drop punctuation tokens before MaxSim.',
+  tags: ['text', 'retrieval', 'colbert'],
+  base: 'https://huggingface.co/litert-community/LFM2.5-ColBERT-350M/resolve/main',
+  file: 'LFM2.5-ColBERT-350M_wi8fc.tflite',
+  signatures: [32, 128, 256, 512],
+  dim: 128,
+  padId: 7,
+  queryMarker: 64400,
+  documentMarker: 64401,
+  queryMaxLength: 31,
+  documentMaxLength: 511,
+  skiplist: true,
+  querySize: 32,
+  queryKeepAll: true,
+})
 
 interface EmbeddingConfig {
   modelId: string
@@ -251,6 +320,8 @@ export const harrierEmbedAdapter = makeEmbeddingAdapter({
 
 export const textAdapters: ModelAdapter[] = [
   mxbaiColbertAdapter,
+  mlateonAdapter,
+  lfmColbertAdapter,
   lfm2EncoderAdapter,
   graniteEmbedAdapter,
   lfm2EmbeddingAdapter,
