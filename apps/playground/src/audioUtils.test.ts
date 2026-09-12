@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeDeltas, decodeSentencePiece, encodeWav, fft, logMelSpectrogram, makeCausalMask, melFilterbank, melSpectrogram, resampleToMono, windowsOf } from './audioUtils'
+import { computeDeltas, decodeSentencePiece, encodeWav, fft, logMelSpectrogram, makeCausalMask, melFilterbank, melFilterbankSlaney, melSpectrogram, resampleToMono, windowsOf } from './audioUtils'
 
 describe('resampleToMono', () => {
   it('downmixes stereo to mono at the same rate', () => {
@@ -89,6 +89,18 @@ describe('melFilterbank', () => {
     expect(basis.every(v => v >= 0 && v <= 1)).toBe(true)
     for (let m = 0; m < 80; m++) {
       const row = basis.subarray(m * 257, (m + 1) * 257)
+      expect(Math.max(...row)).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('melFilterbankSlaney', () => {
+  it('builds finite slaney-normalized triangles for the whisper front-end', () => {
+    const basis = melFilterbankSlaney(16000, 400, 80, 0, 8000)
+    expect(basis.length).toBe(80 * 201)
+    expect(basis.every(v => Number.isFinite(v) && v >= 0)).toBe(true)
+    for (let m = 0; m < 80; m++) {
+      const row = basis.subarray(m * 201, (m + 1) * 201)
       expect(Math.max(...row)).toBeGreaterThan(0)
     }
   })

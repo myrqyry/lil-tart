@@ -211,6 +211,42 @@ export function melFilterbank(
   return basis
 }
 
+/** librosa default (slaney) mel filterbank — used by the OpenAI Whisper front-end. */
+export function melFilterbankSlaney(
+  sampleRate: number,
+  nFft: number,
+  nMels: number,
+  fMin = 0,
+  fMax = sampleRate / 2,
+): Float32Array {
+  const fSp = 200
+  const minLogHz = 1000
+  const minLogMel = (minLogHz - 0) / fSp
+  const logStep = Math.log(6.4) / 27
+  const toMel = (f: number) => (f < minLogHz ? (f - 0) / fSp : minLogMel + Math.log(f / minLogHz) / logStep)
+  const toHz = (m: number) => (m < minLogMel ? fSp * m : minLogHz * Math.exp(logStep * (m - minLogMel)))
+
+  const melMin = toMel(fMin)
+  const melMax = toMel(fMax)
+  const hz = new Float64Array(nMels + 2)
+  for (let i = 0; i < hz.length; i++) hz[i] = toHz(melMin + ((melMax - melMin) * i) / (nMels + 1))
+  const fdiff = new Float64Array(nMels + 1)
+  for (let i = 0; i < fdiff.length; i++) fdiff[i] = hz[i + 1] - hz[i]
+
+  const bins = nFft / 2 + 1
+  const basis = new Float32Array(nMels * bins)
+  for (let m = 0; m < nMels; m++) {
+    const norm = 2 / (hz[m + 2] - hz[m])
+    for (let k = 0; k < bins; k++) {
+      const f = (k * sampleRate) / nFft
+      const lower = (f - hz[m]) / fdiff[m]
+      const upper = (hz[m + 2] - f) / fdiff[m + 1]
+      basis[m * bins + k] = Math.max(0, Math.min(lower, upper)) * norm
+    }
+  }
+  return basis
+}
+
 /** torchaudio `compute_deltas` over a [rows, cols] buffer (time along cols), replicate padding. */
 export function computeDeltas(input: Float32Array, rows: number, cols: number, winLength = 3): Float32Array {
   const k = (winLength - 1) >> 1
