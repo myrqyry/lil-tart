@@ -22,6 +22,30 @@ export interface ModelMetadata {
   tags: string[]
 }
 
+export type VerificationStatus =
+  | 'registered'
+  | 'compile-verified'
+  | 'inference-verified'
+  | 'output-verified'
+  | 'manually-verified'
+
+export type VerificationBackend = 'wasm' | 'webgpu' | 'webnn' | 'native'
+
+/**
+ * Durable evidence for a model adapter. Runtime success in the current browser session
+ * is deliberately separate from this record: an adapter is only promoted when evidence
+ * for the claimed stage has been captured outside the UI's transient state.
+ */
+export interface ModelVerification {
+  status: VerificationStatus
+  backends?: VerificationBackend[]
+  /** ISO date (YYYY-MM-DD) for the evidence represented by this record. */
+  verifiedAt?: string
+  /** Repository path or URL containing the receipt / verification record. */
+  evidence?: string
+  note?: string
+}
+
 /** ponytail: extra graphs loaded alongside `metadata.modelPath` for split models (DETR A/B). */
 export interface ModelGraph {
   name: string
@@ -45,6 +69,8 @@ export interface ModelAdapter {
   outputSpecs: TensorSpec[]
   prepareInputs(values: Record<string, any>): Record<string, import('@litertjs/core').Tensor>
   parseOutputs(outputs: Record<string, import('@litertjs/core').Tensor>): Promise<Record<string, any>>
+  /** Persisted qualification evidence. Omitted adapters are treated as `registered`. */
+  verification?: ModelVerification
   isPipeline?: true
   /** ponytail: no browser-fetchable .tflite yet (verify via HEAD 200 CORS *). UI disables the entry. */
   disabled?: boolean
