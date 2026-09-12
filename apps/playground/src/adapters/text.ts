@@ -168,6 +168,7 @@ interface EmbeddingConfig {
   signaturePrefix: string
   queryPrefix?: string
   documentPrefix?: string
+  padId?: number
 }
 
 function l2Normalize(vector: Float32Array): Float32Array {
@@ -189,7 +190,7 @@ async function embedText(text: string, config: EmbeddingConfig, ctx: InferenceCo
   const tokenizer = await loadHfTokenizer(`${config.base}/tokenizer.json`)
   const ids = tokenizer.encode(prefix + text, { maxLength: config.signatures[config.signatures.length - 1] })
   const size = config.signatures.find((signature) => signature >= ids.length) ?? config.signatures[config.signatures.length - 1]
-  const inputIds = new Int32Array(size)
+  const inputIds = new Int32Array(size).fill(config.padId ?? 0)
   inputIds.set(ids)
   const mask = new Int32Array(size)
   for (let i = 0; i < ids.length; i++) mask[i] = 1
@@ -318,6 +319,34 @@ export const harrierEmbedAdapter = makeEmbeddingAdapter({
   queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ',
 })
 
+export const lfm2Encoder350Adapter = makeEmbeddingAdapter({
+  modelId: 'lfm2.5-encoder-350m',
+  name: 'LFM2.5-Encoder-350M',
+  description: 'Multilingual bidirectional sentence encoder. Mean-pools the token states into a 1024-dim vector and reports the cosine similarity of two texts.',
+  tags: ['text', 'embedding'],
+  base: 'https://huggingface.co/litert-community/LFM2.5-Encoder-350M/resolve/main',
+  file: 'LFM2.5-Encoder-350M_wi8fc.tflite',
+  signatures: [64, 128, 256, 512],
+  dim: 1024,
+  pool: 'mean',
+  signaturePrefix: 'encode',
+})
+
+export const gigaEmbedAdapter = makeEmbeddingAdapter({
+  modelId: 'giga-embeddings',
+  name: 'Giga-Embeddings-instruct-480M-0826',
+  description: 'Russian + English 1024-dim embedding model. Mean pooling and L2 normalization are inside the graph; reports the cosine similarity of two texts.',
+  tags: ['text', 'embedding'],
+  base: 'https://huggingface.co/litert-community/Giga-Embeddings-instruct-480M-0826/resolve/main',
+  file: 'Giga-Embeddings-instruct-480M-0826_wi8fc.tflite',
+  signatures: [64, 128, 256, 512],
+  dim: 1024,
+  pool: 'cls',
+  signaturePrefix: 'embed',
+  padId: 2,
+  queryPrefix: 'Instruct: Given a query, retrieve relevant passages\nQuery: ',
+})
+
 const ETTIN_BASE = 'https://huggingface.co/litert-community/ettin-reranker-400m-v1/resolve/main'
 const ETTIN_SIGNATURES = [128, 256, 512]
 const ETTIN_PAD_ID = 50283
@@ -382,5 +411,7 @@ export const textAdapters: ModelAdapter[] = [
   voyageEmbedAdapter,
   nemotronEmbedAdapter,
   harrierEmbedAdapter,
+  lfm2Encoder350Adapter,
+  gigaEmbedAdapter,
   ettinRerankerAdapter,
 ]
