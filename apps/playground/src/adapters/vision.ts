@@ -76,6 +76,66 @@ function letterbox(imageData: ImageData, size: number, pad = 114): ImageData {
   return ctx.getImageData(0, 0, size, size)
 }
 
+function firstOutput(outputs: Record<string, Tensor>, name: string): Tensor {
+  const t = outputs[name] ?? Object.values(outputs)[0]
+  if (!t) throw new Error('Missing output tensor')
+  return t
+}
+
+function buildNchwBgrRawTensor(imageData: ImageData, w: number, h: number): Tensor {
+  const data = new Float32Array(3 * h * w)
+  const plane = h * w
+  const srcW = imageData.width
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const s = (y * srcW + x) * 4
+      const idx = y * w + x
+      data[0 * plane + idx] = imageData.data[s + 2]
+      data[1 * plane + idx] = imageData.data[s + 1]
+      data[2 * plane + idx] = imageData.data[s + 0]
+    }
+  }
+  return new Tensor(data, [1, 3, h, w])
+}
+
+function maskToImageData(data: Float32Array, w: number, h: number): ImageData {
+  const out = new ImageData(w, h)
+  for (let i = 0; i < w * h; i++) {
+    const v = Math.max(0, Math.min(255, Math.round(data[i] * 255)))
+    out.data[i * 4] = v
+    out.data[i * 4 + 1] = v
+    out.data[i * 4 + 2] = v
+    out.data[i * 4 + 3] = 255
+  }
+  return out
+}
+
+const SEG_PALETTE = [
+  [0, 0, 0], [220, 20, 60], [0, 128, 0], [30, 144, 255], [255, 215, 0],
+  [148, 0, 211], [255, 140, 0], [0, 206, 209], [255, 105, 180], [128, 128, 0],
+  [70, 130, 180], [210, 105, 30], [46, 139, 87], [199, 21, 133], [72, 61, 139],
+  [0, 100, 0], [255, 99, 71], [95, 158, 160], [255, 20, 147],
+]
+
+function argmaxColorize(data: Float32Array, c: number, h: number, w: number): ImageData {
+  const out = new ImageData(w, h)
+  const plane = h * w
+  for (let i = 0; i < plane; i++) {
+    let best = 0
+    let bestV = data[i]
+    for (let k = 1; k < c; k++) {
+      const v = data[k * plane + i]
+      if (v > bestV) { bestV = v; best = k }
+    }
+    const col = SEG_PALETTE[best % SEG_PALETTE.length]
+    out.data[i * 4] = col[0]
+    out.data[i * 4 + 1] = col[1]
+    out.data[i * 4 + 2] = col[2]
+    out.data[i * 4 + 3] = 255
+  }
+  return out
+}
+
 export const headpose6drepnetAdapter: ModelAdapter = {
   modelId: '6drepnet',
   metadata: { name: '6DRepNet — Head Pose', description: '6D head pose estimation (Euler angles)', modelPath: 'https://huggingface.co/litert-community/6DRepNet-HeadPose-LiteRT/resolve/main/6drepnet.tflite', tags: ['vision', 'pose'] },
@@ -96,29 +156,34 @@ export const headpose6drepnetAdapter: ModelAdapter = {
   },
 }
 
-export const blazeFaceAdapter: ModelAdapter = {
-  modelId: 'blaze-face',
-  disabled: true,
-  metadata: { name: 'BlazeFace — Face Detection', description: 'MediaPipe face detection (full-range) — needs locating', modelPath: '/models/blaze-face/blaze_face_full_range.tflite', tags: ['vision', 'face'] },
-  inputSpecs: [inpSpec('input', [1, 128, 128, 3], 'float32', 'RGB 0-255 NHWC')],
+export const yunetAdapter: ModelAdapter = {
+  modelId: 'yunet-face',
+  metadata: { name: 'YuNet — Face Detection', description: 'YuNet face detection with 5-point landmarks (640×640)', modelPath: 'https://huggingface.co/litert-community/YuNet-Face-LiteRT/resolve/main/yunet_fp16.tflite', tags: ['vision', 'face', 'detection'] },
+  inputSpecs: [inpSpec('image', [1, 3, 640, 640], 'float32', 'BGR 0-255 NCHW (no normalization)')],
   outputSpecs: [
-    outSpec('regressors', [1, 896, 16], 'float32', 'Bounding box + 6 keypoint regressors'),
-    outSpec('classificators', [1, 896, 1], 'float32', 'Face presence scores'),
+    outSpec('cls_8', [1, 6400, 1], 'float32', 'Class score, stride 8'),
+    outSpec('cls_16', [1, 1600, 1], 'float32', 'Class score, stride 16'),
+    outSpec('cls_32', [1, 400, 1], 'float32', 'Class score, stride 32'),
+    outSpec('obj_8', [1, 6400, 1], 'float32', 'Objectness, stride 8'),
+    outSpec('obj_16', [1, 1600, 1], 'float32', 'Objectness, stride 16'),
+    outSpec('obj_32', [1, 400, 1], 'float32', 'Objectness, stride 32'),
+    outSpec('bbox_8', [1, 6400, 4], 'float32', 'Box deltas, stride 8'),
+    outSpec('bbox_16', [1, 1600, 4], 'float32', 'Box deltas, stride 16'),
+    outSpec('bbox_32', [1, 400, 4], 'float32', 'Box deltas, stride 32'),
+    outSpec('kps_8', [1, 6400, 10], 'float32', '5 landmarks, stride 8'),
+    outSpec('kps_16', [1, 1600, 10], 'float32', '5 landmarks, stride 16'),
+    outSpec('kps_32', [1, 400, 10], 'float32', '5 landmarks, stride 32'),
   ],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const imageData = values['image'] as ImageData
-    if (!imageData) throw new Error('Image data not provided for blaze-face')
-    const resized = resizeImageData(imageData, 128, 128)
-    return { input: buildNhwcRawTensor(resized, 128, 128) }
+    if (!imageData) throw new Error('Image data not provided for yunet-face')
+    const resized = resizeImageData(imageData, 640, 640)
+    return { image: buildNchwBgrRawTensor(resized, 640, 640) }
   },
   async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
-    const regressors = outputs['regressors']
-    const classificators = outputs['classificators']
-    if (!regressors || !classificators) throw new Error('Missing blaze-face outputs')
-    return {
-      regressors: Array.from(await regressors.data() as Float32Array),
-      classificators: Array.from(await classificators.data() as Float32Array),
-    }
+    const result: Record<string, any> = {}
+    for (const [k, t] of Object.entries(outputs)) result[k] = Array.from(await t.data() as Float32Array)
+    return result
   },
 }
 
@@ -274,12 +339,280 @@ export const styleAdapters: ModelAdapter[] = [
   makeStyleAdapter('style-udnie', 'Neural Style — Udnie', 'https://huggingface.co/litert-community/Fast-Neural-Style-LiteRT/resolve/main/style_udnie_fp16.tflite'),
 ]
 
+function makeYoloxAdapter(modelId: string, label: string, modelPath: string, size: number, rows: number): ModelAdapter {
+  return {
+    modelId,
+    metadata: { name: `YOLOX-${label} — Object Detection`, description: `YOLOX-${label} COCO detection (${size}×${size})`, modelPath, tags: ['vision', 'detection'] },
+    inputSpecs: [inpSpec('images', [1, size, size, 3], 'float32', 'BGR 0-255 NHWC, letterbox pad 114')],
+    outputSpecs: [outSpec('output', [1, rows, 85], 'float32', 'Raw heads: 4 box + 1 obj + 80 class')],
+    prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+      const imageData = values['image'] as ImageData
+      if (!imageData) throw new Error(`Image data not provided for ${modelId}`)
+      const padded = letterbox(imageData, size)
+      return { images: buildNhwcRawTensor(padded, size, size, true) }
+    },
+    async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+      const t = firstOutput(outputs, 'output')
+      return { output: Array.from(await t.data() as Float32Array) }
+    },
+  }
+}
+
+export const yoloxNanoAdapter = makeYoloxAdapter('yolox-nano', 'Nano', 'https://huggingface.co/litert-community/yolox-nano-litert/resolve/main/yolox_nano.tflite', 416, 3549)
+export const yoloxTinyAdapter = makeYoloxAdapter('yolox-tiny', 'Tiny', 'https://huggingface.co/litert-community/yolox-tiny-litert/resolve/main/yolox_tiny.tflite', 416, 3549)
+export const yoloxSAdapter = makeYoloxAdapter('yolox-s', 'S', 'https://huggingface.co/litert-community/yolox-s-litert/resolve/main/yolox_s.tflite', 640, 8400)
+
+export const sinetAdapter: ModelAdapter = {
+  modelId: 'sinet-v2',
+  metadata: { name: 'SINet-V2 — Camouflage Detection', description: 'Camouflaged object segmentation', modelPath: 'https://huggingface.co/litert-community/SINet-V2-Camouflage-LiteRT/resolve/main/sinet.tflite', tags: ['vision', 'segmentation'] },
+  inputSpecs: [inpSpec('input', [1, 3, 352, 352], 'float32', 'RGB ImageNet-normalized NCHW')],
+  outputSpecs: [outSpec('output', [1, 1, 352, 352], 'float32', 'Camouflaged-object probability')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for sinet-v2')
+    const resized = resizeImageData(imageData, 352, 352)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 352, 352], { dataFormat: 'NCHW', normalization: 'imagenet' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: maskToImageData(data, 352, 352) }
+  },
+}
+
+export const disAdapter: ModelAdapter = {
+  modelId: 'dis-isnet',
+  metadata: { name: 'DIS-ISNet — Dichotomous Segmentation', description: 'High-accuracy dichotomous image segmentation', modelPath: 'https://huggingface.co/litert-community/DIS-ISNet-LiteRT/resolve/main/dis.tflite', tags: ['vision', 'segmentation'] },
+  inputSpecs: [inpSpec('input', [1, 3, 1024, 1024], 'float32', 'RGB (x/255 - 0.5) NCHW')],
+  outputSpecs: [outSpec('output', [1, 1, 1024, 1024], 'float32', 'Foreground probability')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for dis-isnet')
+    const resized = resizeImageData(imageData, 1024, 1024)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 1024, 1024], { dataFormat: 'NCHW', normalization: 'imagenet', mean: [0.5, 0.5, 0.5], std: [1, 1, 1] }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: maskToImageData(data, 1024, 1024) }
+  },
+}
+
+export const unisalAdapter: ModelAdapter = {
+  modelId: 'unisal',
+  metadata: { name: 'UniSal — Saliency Detection', description: 'Unified saliency / visual attention map', modelPath: 'https://huggingface.co/litert-community/UniSal-Saliency-LiteRT/resolve/main/unisal_fp16.tflite', tags: ['vision', 'saliency'] },
+  inputSpecs: [inpSpec('input', [1, 3, 256, 256], 'float32', 'RGB ImageNet-normalized NCHW')],
+  outputSpecs: [outSpec('output', [1, 1, 256, 256], 'float32', 'Saliency map (higher = attended)')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for unisal')
+    const resized = resizeImageData(imageData, 256, 256)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 256, 256], { dataFormat: 'NCHW', normalization: 'imagenet' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: maskToImageData(data, 256, 256) }
+  },
+}
+
+export const bisenetFaceAdapter: ModelAdapter = {
+  modelId: 'bisenet-face-parsing',
+  metadata: { name: 'BiSeNet — Face Parsing', description: '19-class face parsing', modelPath: 'https://huggingface.co/litert-community/BiSeNet-Face-Parsing-LiteRT/resolve/main/faceparsing.tflite', tags: ['vision', 'segmentation', 'face'] },
+  inputSpecs: [inpSpec('input', [1, 3, 512, 512], 'float32', 'RGB ImageNet-normalized NCHW')],
+  outputSpecs: [outSpec('output', [1, 19, 512, 512], 'float32', '19-class logits')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for bisenet-face-parsing')
+    const resized = resizeImageData(imageData, 512, 512)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 512, 512], { dataFormat: 'NCHW', normalization: 'imagenet' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: argmaxColorize(data, 19, 512, 512) }
+  },
+}
+
+export const pidnetAdapter: ModelAdapter = {
+  modelId: 'pidnet-s-cityscapes',
+  metadata: { name: 'PIDNet-S — Cityscapes Segmentation', description: '19-class urban scene segmentation (1/8 resolution)', modelPath: 'https://huggingface.co/litert-community/PIDNet-S-Cityscapes-LiteRT/resolve/main/pidnet_s.tflite', tags: ['vision', 'segmentation'] },
+  inputSpecs: [inpSpec('input', [1, 3, 1024, 1024], 'float32', 'RGB ImageNet-normalized NCHW')],
+  outputSpecs: [outSpec('output', [1, 19, 128, 128], 'float32', '19-class logits at 1/8 resolution')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for pidnet-s-cityscapes')
+    const resized = resizeImageData(imageData, 1024, 1024)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 1024, 1024], { dataFormat: 'NCHW', normalization: 'imagenet' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: argmaxColorize(data, 19, 128, 128) }
+  },
+}
+
+export const twinliteAdapter: ModelAdapter = {
+  modelId: 'twinlitenet',
+  metadata: { name: 'TwinLiteNet — Drivable Area & Lanes', description: 'Drivable-area and lane-line segmentation (360×640)', modelPath: 'https://huggingface.co/litert-community/TwinLiteNet-LiteRT/resolve/main/twinlite.tflite', tags: ['vision', 'segmentation'] },
+  inputSpecs: [inpSpec('input', [1, 3, 360, 640], 'float32', 'RGB x/255 NCHW')],
+  outputSpecs: [
+    outSpec('drivable_area', [1, 2, 360, 640], 'float32', 'Drivable-area logits'),
+    outSpec('lane_line', [1, 2, 360, 640], 'float32', 'Lane-line logits'),
+  ],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for twinlitenet')
+    const resized = resizeImageData(imageData, 640, 360)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 360, 640], { dataFormat: 'NCHW', normalization: '0-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const [a, b] = Object.values(outputs)
+    if (!a || !b) throw new Error('Missing twinlitenet outputs')
+    return {
+      drivable_area: argmaxColorize(await a.data() as Float32Array, 2, 360, 640),
+      lane_line: argmaxColorize(await b.data() as Float32Array, 2, 360, 640),
+    }
+  },
+}
+
+export const midasAdapter: ModelAdapter = {
+  modelId: 'midas-small',
+  metadata: { name: 'MiDaS-Small — Depth', description: 'Monocular relative inverse depth (256×256)', modelPath: 'https://huggingface.co/litert-community/MiDaS-small/resolve/main/midas_small_256_fp16.tflite', tags: ['vision', 'depth'] },
+  inputSpecs: [inpSpec('input', [1, 256, 256, 3], 'float32', 'RGB ImageNet-normalized NHWC')],
+  outputSpecs: [outSpec('output', [1, 256, 256], 'float32', 'Relative inverse depth')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for midas-small')
+    const resized = resizeImageData(imageData, 256, 256)
+    return { input: normalizeAndFormatImageData(resized, [1, 256, 256, 3], { dataFormat: 'NHWC', normalization: 'imagenet' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    return { output: await tensorToImageData(firstOutput(outputs, 'output'), 256, 256) }
+  },
+}
+
+export const mogeAdapter: ModelAdapter = {
+  modelId: 'moge-2',
+  metadata: { name: 'MoGe-2 — Geometry', description: 'Monocular point map, normals and valid mask (448×448)', modelPath: 'https://huggingface.co/litert-community/MoGe-2-LiteRT/resolve/main/moge_fp16.tflite', tags: ['vision', 'depth', 'geometry'] },
+  inputSpecs: [inpSpec('input', [1, 3, 448, 448], 'float32', 'RGB [0,1] NCHW')],
+  outputSpecs: [
+    outSpec('points', [1, 448, 448, 3], 'float32', 'Affine point map (exp remap)'),
+    outSpec('normal', [1, 448, 448, 3], 'float32', 'L2-normalized normals'),
+    outSpec('mask', [1, 448, 448, 1], 'float32', 'Valid mask (sigmoid > 0.5)'),
+    outSpec('scale', [1, 1, 1, 1], 'float32', 'Scale'),
+  ],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for moge-2')
+    const resized = resizeImageData(imageData, 448, 448)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 448, 448], { dataFormat: 'NCHW', normalization: '0-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const vals = Object.values(outputs)
+    const normal = vals[1]
+    const mask = vals[2]
+    const scale = vals[3]
+    return {
+      normal: normal ? await tensorToImageData(normal, 448, 448) : undefined,
+      mask: mask ? await tensorToImageData(mask, 448, 448) : undefined,
+      scale: scale ? (await scale.data() as Float32Array)[0] : undefined,
+    }
+  },
+}
+
+export const tipsv2Adapter: ModelAdapter = {
+  modelId: 'tipsv2-b14-dpt',
+  metadata: { name: 'TIPSv2 — Depth, Normals & Seg', description: 'Depth (metres), surface normals and 150-class segmentation (448×448)', modelPath: 'https://huggingface.co/litert-community/TIPSv2-B14-DPT-LiteRT/resolve/main/tipsv2_b14_dpt_fp16.tflite', tags: ['vision', 'depth'] },
+  inputSpecs: [inpSpec('input', [1, 3, 448, 448], 'float32', 'RGB [0,1] NCHW (no ImageNet)')],
+  outputSpecs: [
+    outSpec('depth', [1, 1, 448, 448], 'float32', 'Depth in metres'),
+    outSpec('normals', [1, 3, 448, 448], 'float32', 'Unit surface normals'),
+    outSpec('seg', [1, 150, 256, 256], 'float32', '150-class segmentation logits'),
+  ],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for tipsv2-b14-dpt')
+    const resized = resizeImageData(imageData, 448, 448)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 448, 448], { dataFormat: 'NCHW', normalization: '0-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const [d, n, s] = Object.values(outputs)
+    return {
+      depth: d ? await tensorToImageData(d, 448, 448) : undefined,
+      normals: n ? await tensorToImageData(n, 448, 448) : undefined,
+      seg: s ? argmaxColorize(await s.data() as Float32Array, 150, 256, 256) : undefined,
+    }
+  },
+}
+
+export const nafnetGoproAdapter: ModelAdapter = {
+  modelId: 'nafnet-gopro',
+  metadata: { name: 'NAFNet — Image Deblurring (GoPro)', description: 'Motion deblurring (256×256)', modelPath: 'https://huggingface.co/litert-community/NAFNet-GoPro-width32-LiteRT/resolve/main/nafnet_fp16.tflite', tags: ['vision', 'restoration'] },
+  inputSpecs: [inpSpec('input', [1, 3, 256, 256], 'float32', 'RGB [0,1] NCHW')],
+  outputSpecs: [outSpec('output', [1, 3, 256, 256], 'float32', 'Deblurred RGB [0,1] NCHW')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for nafnet-gopro')
+    const resized = resizeImageData(imageData, 256, 256)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 256, 256], { dataFormat: 'NCHW', normalization: '0-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: nchwToImageData(data, 256, 256) }
+  },
+}
+
+export const gfpganAdapter: ModelAdapter = {
+  modelId: 'gfpgan-v1.4',
+  metadata: { name: 'GFPGAN — Face Restoration', description: 'Blind face restoration (512×512, ~431 MB)', modelPath: 'https://huggingface.co/litert-community/GFPGAN-v1.4-LiteRT/resolve/main/gfpgan_fp16.tflite', tags: ['vision', 'face', 'restoration'] },
+  inputSpecs: [inpSpec('input', [1, 3, 512, 512], 'float32', 'RGB [-1,1] NCHW')],
+  outputSpecs: [outSpec('output', [1, 3, 512, 512], 'float32', 'Restored RGB [-1,1] NCHW')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for gfpgan-v1.4')
+    const resized = resizeImageData(imageData, 512, 512)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 512, 512], { dataFormat: 'NCHW', normalization: '-1-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: nchwToImageDataMinusOneToOne(data, 512, 512) }
+  },
+}
+
+export const siglip2Adapter: ModelAdapter = {
+  modelId: 'siglip2-base',
+  metadata: { name: 'SigLIP2 — Image Embedding', description: 'L2-normalized 768-d image embedding', modelPath: 'https://huggingface.co/litert-community/SigLIP2-base-patch16-224/resolve/main/siglip2_base_224_fp16.tflite', tags: ['vision', 'embedding'] },
+  inputSpecs: [inpSpec('input', [1, 3, 224, 224], 'float32', 'RGB [-1,1] NCHW')],
+  outputSpecs: [outSpec('output', [1, 768], 'float32', 'L2-normalized embedding')],
+  prepareInputs(values: Record<string, any>): Record<string, Tensor> {
+    const imageData = values['image'] as ImageData
+    if (!imageData) throw new Error('Image data not provided for siglip2-base')
+    const resized = resizeImageData(imageData, 224, 224)
+    return { input: normalizeAndFormatImageData(resized, [1, 3, 224, 224], { dataFormat: 'NCHW', normalization: '-1-1' }) }
+  },
+  async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
+    const data = await firstOutput(outputs, 'output').data() as Float32Array
+    return { output: Array.from(data) }
+  },
+}
+
 export const visionAdapters: ModelAdapter[] = [
   headpose6drepnetAdapter,
-  blazeFaceAdapter,
+  yunetAdapter,
   yoloxAdapter,
+  yoloxNanoAdapter,
+  yoloxTinyAdapter,
+  yoloxSAdapter,
   u2netAdapter,
   edsrAdapter,
   miganAdapter,
+  sinetAdapter,
+  disAdapter,
+  unisalAdapter,
+  bisenetFaceAdapter,
+  pidnetAdapter,
+  twinliteAdapter,
+  midasAdapter,
+  mogeAdapter,
+  tipsv2Adapter,
+  nafnetGoproAdapter,
+  gfpganAdapter,
+  siglip2Adapter,
   ...styleAdapters,
 ]
