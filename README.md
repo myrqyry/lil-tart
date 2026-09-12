@@ -7,8 +7,9 @@ runtime infrastructure that can be reused by other applications. The goal is
 simple: **prove a capability once, package it once, and consume it everywhere**
 instead of rebuilding browser inference plumbing in every project.
 
-The workspace currently focuses on LiteRT runtime management, text-to-speech,
-model qualification, and reusable inference contracts.
+The workspace focuses on LiteRT runtime management, model qualification, reusable
+inference contracts, and practical local inference across text, speech, audio,
+vision, OCR, retrieval, and related model families.
 
 ## What it provides
 
@@ -51,6 +52,7 @@ intended for downstream consumers. The UI exposes:
 - model preflight
 - preflight timing and output count
 - recent runtime/inference events
+- durable adapter verification evidence separately from current-session runtime state
 
 Changing the accelerator also reloads the selected model, so the UI cannot claim
 a backend that the currently compiled model is not actually using.
@@ -118,7 +120,8 @@ Before merging runtime or package changes, run:
 pnpm verify
 ```
 
-`pnpm verify` is also the authoritative CI gate.
+`pnpm verify` is also the authoritative deterministic CI gate. Real browser
+qualification is a separate evidence-producing step; see [Verification philosophy](#verification-philosophy).
 
 ## Commands
 
@@ -131,11 +134,15 @@ pnpm verify
 | `pnpm test` | Run tests in all workspace projects |
 | `pnpm test:boundaries` | Verify package dependency and architecture boundaries |
 | `pnpm test:compatibility` | Pack and consume the supported external package surface |
+| `pnpm test:qualification` | Run deterministic runtime-qualification contract tests |
+| `pnpm qualify` | Run real browser qualification cases and write evidence results |
 | `pnpm test:watch` | Watch-mode tests for the playground |
 | `pnpm typecheck` | Type-check all workspace projects |
-| `pnpm verify` | Typecheck + tests + boundary tests + production builds |
+| `pnpm verify` | Typecheck + tests + boundary + compatibility + qualification-contract tests + production builds |
 
-GitHub Actions runs the same verification gate for pull requests.
+GitHub Actions runs the deterministic `pnpm verify` gate for pull requests. The
+`Runtime qualification` workflow runs `pnpm qualify` on demand and uploads its
+evidence artifacts.
 
 ## Runtime example
 
@@ -218,12 +225,33 @@ The repository separates:
 - output validation
 - manual audible/visual verification where appropriate
 
-Real-model and audio findings are kept under `docs/verification/`. The current
-TTS verification record is:
+The playground makes the same distinction in adapter metadata. Every adapter has
+an evidence level; adapters without an explicit `verification` record are shown
+as **Registered** rather than implicitly treated as working.
 
-- `docs/verification/2026-08-10-package-extraction.md`
+The levels are monotonic claims about captured evidence:
 
-No capability should be promoted to “working” from build output alone.
+| Evidence level | Meaning |
+|----------------|---------|
+| `registered` | Adapter/model wiring exists; no runtime claim is implied |
+| `compile-verified` | The model compiled on the recorded backend |
+| `inference-verified` | Real inference completed on the recorded backend |
+| `output-verified` | Inference completed and output passed model-specific validation |
+| `manually-verified` | Human-observable output was checked where semantic quality cannot be established mechanically (for example audible TTS or visual output) |
+
+An adapter verification record may also name the backend(s), verification date,
+and a repository path or URL containing the evidence. Current-session UI state
+such as “Ready”, compile timing, or a successful preflight never upgrades this
+durable evidence level by itself.
+
+`pnpm verify` validates code, contracts, tests, package boundaries, and builds. It
+does **not** by itself prove every registered adapter has successfully run its
+real model. Use `pnpm qualify` (or the manually dispatched `Runtime qualification`
+workflow) for browser-observed qualification cases, and only promote an adapter's
+verification level when the corresponding evidence exists.
+
+Real-model and audio findings are kept under `docs/verification/`. No capability
+should be promoted to “working” from build output alone.
 
 ## Package boundaries
 
