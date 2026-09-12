@@ -1,5 +1,5 @@
 import type { InferenceContext, ModelAdapter } from './types'
-import { decodeSentencePiece, makeCausalMask, windowsOf } from '../audioUtils'
+import { decodeSentencePiece, logMelSpectrogram, makeCausalMask, windowsOf } from '../audioUtils'
 import { flatten } from './util'
 
 const MODEL_PATH = 'https://huggingface.co/litert-community/moonshine-tiny/resolve/main/moonshine_tiny_5s_f32.tflite'
@@ -280,4 +280,90 @@ export const wav2vec2Adapter: ModelAdapter = {
   },
 }
 
-export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter]
+const PANNS_PATH = 'https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/cnn14_audioset_fp16.tflite'
+const PANNS_MEL_PATH = 'https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/mel_basis.bin'
+const PANNS_LABELS_PATH = 'https://huggingface.co/litert-community/PANNs-CNN14-AudioSet-LiteRT/resolve/main/audioset_labels.txt'
+const PANNS_RATE = 32000
+const PANNS_SAMPLES = 320000 // 10 s @ 32 kHz
+const PANNS_NMELS = 64
+const PANNS_FRAMES = 1001
+
+let melBasisPromise: Promise<Float32Array> | null = null
+let labelsPromise: Promise<string[]> | null = null
+
+function loadMelBasis(): Promise<Float32Array> {
+  if (!melBasisPromise) {
+    melBasisPromise = fetch(PANNS_MEL_PATH)
+      .then(response => {
+        if (!response.ok) throw new Error(`mel_basis.bin ${response.status}`)
+        return response.arrayBuffer()
+      })
+      .then(buffer => new Float32Array(buffer))
+      .catch(cause => {
+        melBasisPromise = null
+        throw cause
+      })
+  }
+  return melBasisPromise
+}
+
+function loadLabels(): Promise<string[]> {
+  if (!labelsPromise) {
+    labelsPromise = fetch(PANNS_LABELS_PATH)
+      .then(response => {
+        if (!response.ok) throw new Error(`audioset_labels.txt ${response.status}`)
+        return response.text()
+      })
+      .then(text => text.split('\n').map(line => line.replace(/\r$/, '')))
+      .catch(cause => {
+        labelsPromise = null
+        throw cause
+      })
+  }
+  return labelsPromise
+}
+
+export const pannsAdapter: ModelAdapter = {
+  modelId: 'panns-cnn14',
+  metadata: {
+    name: 'PANNs CNN14 — AudioSet Tagging',
+    description: 'Multi-label sound-event tagging over 527 AudioSet classes. Host log-mel (1024-pt FFT), CNN14 on GPU.',
+    modelPath: PANNS_PATH,
+    tags: ['audio', 'tagging', 'audioset', 'panns'],
+  },
+  inputSpecs: [{
+    name: 'audio',
+    dtype: 'float32',
+    shape: [1, PANNS_SAMPLES],
+    description: 'Mono PCM at 32 kHz in [-1, 1]; padded/truncated to 10 seconds',
+    constraints: { sampleRate: PANNS_RATE },
+  }],
+  outputSpecs: [{
+    name: 'tags',
+    dtype: 'float32',
+    shape: [],
+    description: 'Top-5 AudioSet tags with probabilities',
+  }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const raw = values['audio']
+    const audio = raw instanceof Float32Array ? raw : flatten(raw ?? [])
+    if (!audio.length) throw new Error('No audio provided')
+    const [basis, labels] = await Promise.all([loadMelBasis(), loadLabels()])
+    const logmel = logMelSpectrogram(audio, basis, PANNS_NMELS, 1024, 320, PANNS_RATE)
+    const out = await ctx.predict('main', [ctx.createTensor(logmel, [1, 1, PANNS_FRAMES, PANNS_NMELS])])
+    const probs = (await Object.values(out)[0].data()) as Float32Array
+
+    const ranked = Array.from(probs, (score, id) => ({ score, id }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5)
+    return { tags: ranked.map(({ score, id }) => `${score.toFixed(3)}  ${labels[id] ?? `class ${id}`}`).join('\n') }
+  },
+}
+
+export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter, pannsAdapter]

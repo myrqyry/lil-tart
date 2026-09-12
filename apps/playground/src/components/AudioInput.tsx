@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { TensorSpec } from '../adapters/types'
-import { resampleToMono16k } from '../audioUtils'
+import { resampleToMono } from '../audioUtils'
 
 interface AudioInputProps {
   specs: TensorSpec[]
@@ -21,9 +21,10 @@ export default function AudioInput({ specs, onChange }: AudioInputProps) {
       const buffer = await context.decodeAudioData(await file.arrayBuffer())
       void context.close()
       const channels = Array.from({ length: buffer.numberOfChannels }, (_, c) => buffer.getChannelData(c))
-      const audio = resampleToMono16k(channels, buffer.sampleRate)
+      const targetRate = spec.constraints?.sampleRate ?? 16000
+      const audio = resampleToMono(channels, buffer.sampleRate, targetRate)
       onChange({ [spec.name]: audio })
-      setStatus(`${(audio.length / 16000).toFixed(2)} s · 16 kHz mono`)
+      setStatus(`${(audio.length / targetRate).toFixed(2)} s · ${targetRate / 1000} kHz mono`)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause))
       setStatus(null)

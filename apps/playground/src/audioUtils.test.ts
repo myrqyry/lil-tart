@@ -1,21 +1,22 @@
 import { describe, expect, it } from 'vitest'
-import { decodeSentencePiece, makeCausalMask, resampleToMono16k, windowsOf } from './audioUtils'
+import { decodeSentencePiece, fft, logMelSpectrogram, makeCausalMask, resampleToMono, windowsOf } from './audioUtils'
 
-describe('resampleToMono16k', () => {
+describe('resampleToMono', () => {
   it('downmixes stereo to mono at the same rate', () => {
     const left = new Float32Array([1, 0, 1, 0])
     const right = new Float32Array([0, 1, 0, 1])
-    expect(Array.from(resampleToMono16k([left, right], 16000))).toEqual([0.5, 0.5, 0.5, 0.5])
+    expect(Array.from(resampleToMono([left, right], 16000))).toEqual([0.5, 0.5, 0.5, 0.5])
   })
 
   it('halves the length when downsampling 32 kHz to 16 kHz', () => {
     const mono = new Float32Array(320)
     mono.fill(1)
-    expect(resampleToMono16k([mono], 32000).length).toBe(160)
+    expect(resampleToMono([mono], 32000).length).toBe(160)
+    expect(resampleToMono([mono], 32000, 32000).length).toBe(320)
   })
 
   it('returns empty for empty input', () => {
-    expect(resampleToMono16k([new Float32Array(0)], 16000).length).toBe(0)
+    expect(resampleToMono([new Float32Array(0)], 16000).length).toBe(0)
   })
 })
 
@@ -50,5 +51,24 @@ describe('windowsOf', () => {
 
   it('returns a single empty window for empty audio', () => {
     expect(windowsOf(new Float32Array(0), 4)).toHaveLength(1)
+  })
+})
+
+describe('fft', () => {
+  it('transforms an impulse into a flat unit spectrum', () => {
+    const re = new Float32Array([1, 0, 0, 0])
+    const im = new Float32Array(4)
+    fft(re, im)
+    expect(Array.from(re).map(v => Math.round(v * 1e6) / 1e6)).toEqual([1, 1, 1, 1])
+    expect(Array.from(im).map(v => Math.round(v * 1e6) / 1e6)).toEqual([0, 0, 0, 0])
+  })
+})
+
+describe('logMelSpectrogram', () => {
+  it('returns frames*nMels finite log values (-100 dB floor for silence)', () => {
+    const basis = new Float32Array(4 * 513).fill(1)
+    const logmel = logMelSpectrogram(new Float32Array(320000), basis, 4, 1024, 320, 32000)
+    expect(logmel.length).toBe(1001 * 4)
+    expect(logmel.every(v => v === -100)).toBe(true)
   })
 })

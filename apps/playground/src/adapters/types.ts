@@ -10,6 +10,8 @@ export interface TensorSpec {
     items?: string[]
     /** ponytail: marks a free-text field the adapter tokenizes itself in `run`/`prepareInputs`. */
     text?: boolean
+    /** Target sample rate (Hz) the audio input is resampled to; defaults to 16000. */
+    sampleRate?: number
   }
 }
 
