@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { decodeSentencePiece, fft, logMelSpectrogram, makeCausalMask, resampleToMono, windowsOf } from './audioUtils'
+import { computeDeltas, decodeSentencePiece, fft, logMelSpectrogram, makeCausalMask, melFilterbank, melSpectrogram, resampleToMono, windowsOf } from './audioUtils'
 
 describe('resampleToMono', () => {
   it('downmixes stereo to mono at the same rate', () => {
@@ -70,5 +70,33 @@ describe('logMelSpectrogram', () => {
     const logmel = logMelSpectrogram(new Float32Array(320000), basis, 4, 1024, 320, 32000)
     expect(logmel.length).toBe(1001 * 4)
     expect(logmel.every(v => v === -100)).toBe(true)
+  })
+})
+
+describe('melSpectrogram', () => {
+  it('honours a shorter centred window and returns raw power', () => {
+    const basis = new Float32Array(4 * 257).fill(1)
+    const power = melSpectrogram(new Float32Array(80000), basis, 4, 512, 160, 16000, 400, 80000)
+    expect(power.length).toBe((1 + 80000 / 160) * 4)
+    expect(power.every(v => v === 0)).toBe(true)
+  })
+})
+
+describe('melFilterbank', () => {
+  it('builds non-negative HTK triangles with one peak per mel', () => {
+    const basis = melFilterbank(16000, 512, 80, 0, 8000)
+    expect(basis.length).toBe(80 * 257)
+    expect(basis.every(v => v >= 0 && v <= 1)).toBe(true)
+    for (let m = 0; m < 80; m++) {
+      const row = basis.subarray(m * 257, (m + 1) * 257)
+      expect(Math.max(...row)).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('computeDeltas', () => {
+  it('matches torchaudio on a linear ramp (replicate edges)', () => {
+    const deltas = computeDeltas(new Float32Array([0, 1, 2, 3, 4]), 1, 5, 3)
+    expect(Array.from(deltas)).toEqual([0.5, 1, 1, 1, 0.5])
   })
 })

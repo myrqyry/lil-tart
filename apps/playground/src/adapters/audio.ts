@@ -1,5 +1,6 @@
 import type { InferenceContext, ModelAdapter } from './types'
-import { decodeSentencePiece, logMelSpectrogram, makeCausalMask, windowsOf } from '../audioUtils'
+import { computeDeltas, decodeSentencePiece, logMelSpectrogram, makeCausalMask, melFilterbank, melSpectrogram, windowsOf } from '../audioUtils'
+import { loadHfTokenizer } from '../hfTokenizer'
 import { flatten } from './util'
 
 const MODEL_PATH = 'https://huggingface.co/litert-community/moonshine-tiny/resolve/main/moonshine_tiny_5s_f32.tflite'
@@ -444,4 +445,108 @@ export const basicPitchAdapter: ModelAdapter = {
   },
 }
 
-export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter, pannsAdapter, basicPitchAdapter]
+const GRANITE_SPEECH_BASE = 'https://huggingface.co/litert-community/granite-speech-5.0-470m-turboctc/resolve/main'
+const GRANITE_SPEECH_PATH = `${GRANITE_SPEECH_BASE}/granite_speech_ctc_wi8fc.tflite`
+const GRANITE_WINDOWS = [5, 10, 30]
+const GRANITE_RATE = 16000
+const GRANITE_NMELS = 80
+const GRANITE_MEL = melFilterbank(GRANITE_RATE, 512, GRANITE_NMELS, 0, 8000)
+
+// 5/10/30 s window → [nFrames/2, 320] features (80 log-mel + 80 deltas, two frames interleaved).
+function graniteFeatures(audio: Float32Array, seconds: number): Float32Array {
+  const samples = seconds * GRANITE_RATE
+  const padded = new Float32Array(samples)
+  padded.set(audio.subarray(0, Math.min(audio.length, samples)))
+  const power = melSpectrogram(padded, GRANITE_MEL, GRANITE_NMELS, 512, 160, GRANITE_RATE, 400, samples)
+  const nFrames = Math.floor(samples / 160)
+
+  const mel = new Float32Array(GRANITE_NMELS * nFrames)
+  let max = -Infinity
+  for (let t = 0; t < nFrames; t++) {
+    for (let m = 0; m < GRANITE_NMELS; m++) {
+      const value = Math.log10(Math.max(power[t * GRANITE_NMELS + m], 1e-10))
+      mel[m * nFrames + t] = value
+      if (value > max) max = value
+    }
+  }
+  const floor = max - 8
+  for (let i = 0; i < mel.length; i++) mel[i] = Math.max(mel[i], floor) / 4 + 1
+  const deltas = computeDeltas(mel, GRANITE_NMELS, nFrames, 3)
+
+  const rows = nFrames >> 1
+  const features = new Float32Array(rows * 320)
+  for (let i = 0; i < rows; i++) {
+    for (let m = 0; m < GRANITE_NMELS; m++) {
+      features[i * 320 + m] = mel[m * nFrames + 2 * i]
+      features[i * 320 + 80 + m] = deltas[m * nFrames + 2 * i]
+      features[i * 320 + 160 + m] = mel[m * nFrames + 2 * i + 1]
+      features[i * 320 + 240 + m] = deltas[m * nFrames + 2 * i + 1]
+    }
+  }
+  return features
+}
+
+async function transcribeGranite(audio: Float32Array, seconds: number, ctx: InferenceContext): Promise<string> {
+  const features = graniteFeatures(audio, seconds)
+  const out = await ctx.predict(
+    'main',
+    { input_features: ctx.createTensor(features, [1, features.length / 320, 320]) },
+    `transcribe_${seconds}s`,
+  )
+  let ids: Int32Array | null = null
+  for (const tensor of Object.values(out)) {
+    const data = await tensor.data()
+    if (data instanceof Int32Array) { ids = data; break }
+  }
+  if (!ids) return ''
+  const collapsed: number[] = []
+  let previous = -1
+  for (const id of ids) {
+    if (id !== previous && id !== 0) collapsed.push(id)
+    previous = id
+  }
+  const tokenizer = await loadHfTokenizer(`${GRANITE_SPEECH_BASE}/tokenizer.json`)
+  return tokenizer.decode(collapsed).trim()
+}
+
+export const graniteSpeechAdapter: ModelAdapter = {
+  modelId: 'granite-speech',
+  metadata: {
+    name: 'Granite Speech 470M — Speech Recognition',
+    description: 'CTC ASR with a host log-mel frontend (no external assets). Single graph; CTC argmax is decoded in-graph.',
+    modelPath: GRANITE_SPEECH_PATH,
+    tags: ['audio', 'asr', 'ctc', 'granite'],
+  },
+  inputSpecs: [{
+    name: 'audio',
+    dtype: 'float32',
+    shape: [1, 30 * GRANITE_RATE],
+    description: 'Mono PCM at 16 kHz in [-1, 1]; processed in up to 30-second windows',
+  }],
+  outputSpecs: [{
+    name: 'text',
+    dtype: 'float32',
+    shape: [],
+    description: 'Transcribed text',
+  }],
+  prepareInputs() {
+    return {}
+  },
+  async parseOutputs() {
+    return {}
+  },
+  async run(values, ctx) {
+    const raw = values['audio']
+    const audio = raw instanceof Float32Array ? raw : flatten(raw ?? [])
+    if (!audio.length) throw new Error('No audio provided')
+    const parts: string[] = []
+    for (const window of windowsOf(audio, 30 * GRANITE_RATE)) {
+      const seconds = GRANITE_WINDOWS.find(s => window.length <= s * GRANITE_RATE) ?? 30
+      const text = await transcribeGranite(window, seconds, ctx)
+      if (text) parts.push(text)
+    }
+    return { text: parts.join(' ').trim() }
+  },
+}
+
+export const audioAdapters: ModelAdapter[] = [moonshineAdapter, crepeAdapter, wav2vec2Adapter, pannsAdapter, basicPitchAdapter, graniteSpeechAdapter]

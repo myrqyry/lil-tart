@@ -92,18 +92,21 @@ export function fft(re: Float32Array, im: Float32Array): void {
 }
 
 /**
- * torchlibrosa-exact log-mel for PANNs: reflect-pad centre, periodic Hann, 1024-pt rFFT,
- * power, mel matmul, `10*log10(max(mel,1e-10))`. Returns a frame-major [frames, nMels] buffer.
+ * Raw power mel spectrogram (no dB): reflect-pad centre, periodic Hann, rFFT, power, mel matmul.
+ * `winLength` shorter than `nFft` is zero-padded centred (torch.stft); `sampleCount` is the
+ * reflect-padded clip length. Frame-major [frames, nMels].
  */
-export function logMelSpectrogram(
+export function melSpectrogram(
   audio: Float32Array,
   melBasis: Float32Array,
   nMels: number,
   nFft = 1024,
   hop = 320,
   sampleRate = 32000,
+  winLength = nFft,
+  sampleCount = Math.floor(sampleRate * 10),
 ): Float32Array {
-  const clip = Math.floor(sampleRate * 10)
+  const clip = sampleCount
   const pad = nFft / 2
   const padded = new Float32Array(clip + nFft)
   for (let i = 0; i < padded.length; i++) {
@@ -114,7 +117,8 @@ export function logMelSpectrogram(
   }
 
   const window = new Float32Array(nFft)
-  for (let n = 0; n < nFft; n++) window[n] = 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / nFft)
+  const offset = (nFft - winLength) >> 1
+  for (let n = 0; n < winLength; n++) window[offset + n] = 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / winLength)
 
   const bins = nFft / 2 + 1
   const frames = 1 + Math.floor(clip / hop)
@@ -132,7 +136,74 @@ export function logMelSpectrogram(
       let sum = 0
       const row = m * bins
       for (let k = 0; k < bins; k++) sum += (re[k] * re[k] + im[k] * im[k]) * melBasis[row + k]
-      out[t * nMels + m] = 10 * Math.log10(Math.max(sum, 1e-10))
+      out[t * nMels + m] = sum
+    }
+  }
+  return out
+}
+
+/** torchlibrosa-exact log-mel for PANNs: `10*log10(max(mel,1e-10))`. Frame-major [frames, nMels]. */
+export function logMelSpectrogram(
+  audio: Float32Array,
+  melBasis: Float32Array,
+  nMels: number,
+  nFft = 1024,
+  hop = 320,
+  sampleRate = 32000,
+): Float32Array {
+  const mel = melSpectrogram(audio, melBasis, nMels, nFft, hop, sampleRate)
+  for (let i = 0; i < mel.length; i++) mel[i] = 10 * Math.log10(Math.max(mel[i], 1e-10))
+  return mel
+}
+
+/** torchaudio `melscale_fbanks` HTK triangular filterbank, norm=None. Returns [nMels, nFft/2+1]. */
+export function melFilterbank(
+  sampleRate: number,
+  nFft: number,
+  nMels: number,
+  fMin = 0,
+  fMax = sampleRate / 2,
+): Float32Array {
+  const toMel = (f: number) => 2595 * Math.log10(1 + f / 700)
+  const toHz = (m: number) => 700 * (10 ** (m / 2595) - 1)
+  const melMin = toMel(fMin)
+  const melMax = toMel(fMax)
+  const points = new Float32Array(nMels + 2)
+  for (let i = 0; i < points.length; i++) points[i] = toHz(melMin + ((melMax - melMin) * i) / (nMels + 1))
+
+  const bins = nFft / 2 + 1
+  const basis = new Float32Array(nMels * bins)
+  for (let m = 0; m < nMels; m++) {
+    const left = points[m]
+    const center = points[m + 1]
+    const right = points[m + 2]
+    for (let k = 0; k < bins; k++) {
+      const f = (k * sampleRate) / nFft
+      let weight = 0
+      if (f >= left && f <= center) weight = (f - left) / (center - left)
+      else if (f > center && f <= right) weight = (right - f) / (right - center)
+      basis[m * bins + k] = weight
+    }
+  }
+  return basis
+}
+
+/** torchaudio `compute_deltas` over a [rows, cols] buffer (time along cols), replicate padding. */
+export function computeDeltas(input: Float32Array, rows: number, cols: number, winLength = 3): Float32Array {
+  const k = (winLength - 1) >> 1
+  let denominator = 0
+  for (let i = 1; i <= k; i++) denominator += 2 * i * i
+  const out = new Float32Array(rows * cols)
+  for (let r = 0; r < rows; r++) {
+    const row = r * cols
+    for (let t = 0; t < cols; t++) {
+      let sum = 0
+      for (let i = 1; i <= k; i++) {
+        const before = input[row + Math.max(0, t - i)]
+        const after = input[row + Math.min(cols - 1, t + i)]
+        sum += i * (after - before)
+      }
+      out[row + t] = sum / denominator
     }
   }
   return out
