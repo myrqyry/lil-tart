@@ -90,7 +90,7 @@ export const moonshineAdapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'text',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Transcribed text',
   }],
@@ -209,7 +209,7 @@ function makeWhisperAdapter(config: WhisperConfig): ModelAdapter {
     }],
     outputSpecs: [{
       name: 'text',
-      dtype: 'float32',
+      dtype: 'string',
       shape: [],
       description: 'Transcribed text',
     }],
@@ -319,7 +319,7 @@ export const crepeAdapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'pitch',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Median detected pitch (Hz + nearest note)',
   }],
@@ -399,7 +399,7 @@ export const wav2vec2Adapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'text',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Transcribed text',
   }],
@@ -467,7 +467,7 @@ export const wav2vec2KeywordAdapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'keyword',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Keyword class scores',
   }],
@@ -561,7 +561,7 @@ export const pannsAdapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'tags',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Top-5 AudioSet tags with probabilities',
   }],
@@ -617,7 +617,7 @@ export const basicPitchAdapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'notes',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Detected notes (start time · name · duration)',
   }],
@@ -745,7 +745,7 @@ export const graniteSpeechAdapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'text',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Transcribed text',
   }],
@@ -880,7 +880,7 @@ export const parakeetJapaneseAdapter: ModelAdapter = {
   }],
   outputSpecs: [{
     name: 'text',
-    dtype: 'float32',
+    dtype: 'string',
     shape: [],
     description: 'Transcribed text',
   }],

@@ -379,7 +379,7 @@ export const ettinRerankerAdapter: ModelAdapter = {
     { name: 'query', dtype: 'string', shape: [], description: 'Search query', constraints: { text: true } },
     { name: 'passages', dtype: 'string', shape: [], description: 'Candidate passages, one per line', constraints: { text: true } },
   ],
-  outputSpecs: [{ name: 'scores', dtype: 'float32', shape: [], description: 'Raw relevance logits, highest first' }],
+  outputSpecs: [{ name: 'scores', dtype: 'string', shape: [], description: 'Ranked relevance logits with passage text' }],
   prepareInputs() {
     return {}
   },
@@ -471,7 +471,7 @@ export const piiDetectorAdapter: ModelAdapter = {
     tags: ['text', 'ner', 'privacy'],
   },
   inputSpecs: [{ name: 'text', dtype: 'string', shape: [], description: 'Text to scan for personal information', constraints: { text: true } }],
-  outputSpecs: [{ name: 'entities', dtype: 'float32', shape: [], description: 'Detected entities as "<type>  <text>" lines' }],
+  outputSpecs: [{ name: 'entities', dtype: 'string', shape: [], description: 'Detected entities as "<type>  <text>" lines' }],
   prepareInputs() {
     return {}
   },
@@ -547,7 +547,7 @@ export const policyLinterAdapter: ModelAdapter = {
     { name: 'text', dtype: 'string', shape: [], description: 'Document to lint', constraints: { text: true } },
     { name: 'rules', dtype: 'string', shape: [], description: 'Policy rules, one per line (up to 8)', constraints: { text: true } },
   ],
-  outputSpecs: [{ name: 'violations', dtype: 'float32', shape: [], description: 'Flagged spans per rule' }],
+  outputSpecs: [{ name: 'violations', dtype: 'string', shape: [], description: 'Flagged spans per rule' }],
   prepareInputs() {
     return {}
   },
@@ -621,7 +621,7 @@ export const promptRouterAdapter: ModelAdapter = {
     { name: 'text', dtype: 'string', shape: [], description: 'Prompt to route', constraints: { text: true } },
     { name: 'lanes', dtype: 'string', shape: [], description: 'Routing lanes, one per line (up to 8)', constraints: { text: true } },
   ],
-  outputSpecs: [{ name: 'routes', dtype: 'float32', shape: [], description: 'Per-lane confidence, ranked' }],
+  outputSpecs: [{ name: 'routes', dtype: 'string', shape: [], description: 'Per-lane confidence, ranked' }],
   prepareInputs() {
     return {}
   },
@@ -700,7 +700,7 @@ export const spellcheckerAdapter: ModelAdapter = {
     tags: ['text', 'grammar', 'spellcheck'],
   },
   inputSpecs: [{ name: 'text', dtype: 'string', shape: [], description: 'Text to correct', constraints: { text: true } }],
-  outputSpecs: [{ name: 'corrected', dtype: 'float32', shape: [], description: 'Corrected text' }],
+  outputSpecs: [{ name: 'corrected', dtype: 'string', shape: [], description: 'Corrected text' }],
   prepareInputs() {
     return {}
   },
