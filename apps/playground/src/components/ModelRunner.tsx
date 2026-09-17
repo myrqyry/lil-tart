@@ -2,11 +2,13 @@ import { useCallback, useState } from 'react'
 import { useModelRunner } from '../hooks/useModelRunner'
 import type { Accelerator } from '../hooks/useModelRunner'
 import type { ModelAdapter, TensorSpec } from '../adapters/types'
+import { getTartGuideMessage } from '../tartGuide'
 import ModelList from './ModelList'
 import InputEditor from './InputEditor'
 import ImageInput from './ImageInput'
 import AudioInput from './AudioInput'
 import OutputViewer from './OutputViewer'
+import TartGuide from './TartGuide'
 
 function isVisionSpec(spec: TensorSpec): boolean {
   const s = spec.shape
@@ -111,6 +113,18 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     : adapters
 
   const recentTelemetry = telemetry.slice(-4).reverse()
+  const tartGuide = getTartGuideMessage({
+    selectedModelName: selectedAdapter?.metadata.name ?? null,
+    loading,
+    loaded,
+    progressPercent: downloadProgress?.totalBytes ? progressPercent(downloadProgress) : null,
+    error,
+    requestedBackend: accelerator,
+    resolvedBackend: resolvedAccelerator,
+    fallbackCount: modelInfo?.fallbackCount ?? 0,
+    preflightComplete: preflight !== null,
+    inferenceComplete: outputs !== null,
+  })
 
   return (
     <div className="min-h-screen bg-surface-dim">
@@ -286,6 +300,11 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           </div>
         )}
       </div>
+
+      <TartGuide
+        guide={tartGuide}
+        onRunPreflight={selectedAdapter && loaded ? () => void preflightModel() : undefined}
+      />
     </div>
   )
 }
