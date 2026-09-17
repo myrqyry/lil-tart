@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
-import type { ModelManifest, RuntimeContext } from '@litert-playground/inference-core'
+import type { ModelManifest } from '@litert-playground/inference-core'
 import { createHttpAssetResolver } from '@litert-playground/inference-core'
-import { createLiteRtRuntime } from '@litert-playground/runtime-litert'
+import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
 import {
   LiteRtLmTextPipeline,
   lfm2_5InstructManifest,
@@ -57,46 +57,82 @@ export function LfmPipelinePanel() {
   const [error, setError] = useState<string | null>(null)
 
   const pipelineRef = useRef<AnyPipeline | null>(null)
-  const ctxRef = useRef<RuntimeContext | null>(null)
+  const ctxRef = useRef<ManagedLiteRtRuntimeContext | null>(null)
+  const loadGenerationRef = useRef(0)
 
   const entry = MODELS.find(m => m.id === modelId) ?? MODELS[0]
 
   const disposePipeline = async () => {
-    if (pipelineRef.current) {
-      try { await pipelineRef.current.dispose() } catch { /* noop */ }
-      pipelineRef.current = null
-    }
+    const pipeline = pipelineRef.current
+    const ctx = ctxRef.current
+    pipelineRef.current = null
     ctxRef.current = null
+
+    if (pipeline) {
+      try { await pipeline.dispose() } catch { /* cleanup should be best-effort */ }
+    }
+    ctx?.liteRt.dispose()
   }
 
-  const load = async (id: string) => {
+  const load = async (id: string, generation: number) => {
     const m = MODELS.find(x => x.id === id) ?? MODELS[0]
     setStatus('Loading...')
     setError(null)
+
+    let ctx: ManagedLiteRtRuntimeContext | null = null
+    let nextPipeline: AnyPipeline | null = null
+
     try {
       await disposePipeline()
-      const ctx = await createLiteRtRuntime({
+      if (generation !== loadGenerationRef.current) return
+
+      ctx = await createLiteRtRuntime({
         assetBase: '/',
         assets: createHttpAssetResolver('/'),
         supportedBackends: { webgpu: true, wasm: true },
       })
+      if (generation !== loadGenerationRef.current) {
+        ctx.liteRt.dispose()
+        return
+      }
+
       ctxRef.current = ctx
-      const p: AnyPipeline =
+      nextPipeline =
         m.kind === 'text' ? new LiteRtLmTextPipeline(m.manifest)
         : m.kind === 'colbert' ? new ColBertPipeline({ manifest: m.manifest })
         : new EncoderPipeline({ manifest: m.manifest })
-      await p.load(ctx)
-      pipelineRef.current = p
+
+      await nextPipeline.load(ctx)
+      if (generation !== loadGenerationRef.current) {
+        try { await nextPipeline.dispose() } catch { /* cleanup should be best-effort */ }
+        ctx.liteRt.dispose()
+        if (ctxRef.current === ctx) ctxRef.current = null
+        return
+      }
+
+      pipelineRef.current = nextPipeline
       setStatus('Ready')
       setProgress('')
     } catch (e: unknown) {
+      if (generation !== loadGenerationRef.current) return
+      if (nextPipeline) {
+        try { await nextPipeline.dispose() } catch { /* cleanup should be best-effort */ }
+      }
+      ctx?.liteRt.dispose()
+      if (ctxRef.current === ctx) ctxRef.current = null
       setStatus('Load failed')
       setError(String(e))
     }
   }
 
   useEffect(() => {
-    void load(modelId)
+    const generation = ++loadGenerationRef.current
+    void load(modelId, generation)
+
+    return () => {
+      loadGenerationRef.current += 1
+      void disposePipeline()
+    }
   }, [modelId])
 
   const handleRun = async () => {
@@ -141,10 +177,11 @@ export function LfmPipelinePanel() {
   }
 
   const handleRetry = () => {
+    const generation = ++loadGenerationRef.current
     setStatus('Not loaded')
     setError(null)
     setProgress('')
-    void load(modelId)
+    void load(modelId, generation)
   }
 
   return (
