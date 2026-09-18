@@ -60,12 +60,17 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
     const assetUrl = resolvedAssetUrl(asset.path, base)
     const key = cacheKey(owner, assetUrl)
 
+    let cache: Cache | null = null
     try {
-      const cache = await storage.open(CACHE_NAME)
+      cache = await storage.open(CACHE_NAME)
       const cached = await cache.match(key)
       if (cached) return cached.arrayBuffer()
+    } catch {
+      cache = null
+    }
 
-      const fresh = await inner.resolve(asset, options)
+    const fresh = await inner.resolve(asset, options)
+    if (cache) {
       try {
         await cache.put(
           key,
@@ -81,10 +86,8 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
       } catch {
         // Persistent storage is optional; the fresh model can still run.
       }
-      return fresh
-    } catch {
-      return inner.resolve(asset, options)
     }
+    return fresh
   }
 
   return {
