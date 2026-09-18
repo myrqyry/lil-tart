@@ -98,9 +98,8 @@ function FamilyGlyph({ family, className = '' }: { family: ModelFamily; classNam
   if (family === 'Vision & image') {
     return (
       <svg {...common}>
-        <rect x="3.5" y="4" width="17" height="16" rx="3" />
-        <circle cx="9" cy="9" r="1.5" />
-        <path d="m6 17 4-4 3 3 2.5-2.5L18 16" />
+        <path d="M2.8 12s3.2-5.4 9.2-5.4S21.2 12 21.2 12 18 17.4 12 17.4 2.8 12 2.8 12Z" />
+        <circle cx="12" cy="12" r="2.8" />
       </svg>
     )
   }
@@ -132,6 +131,61 @@ function FamilyGlyph({ family, className = '' }: { family: ModelFamily; classNam
       <path d="M17 14v6m-3-3h6" />
     </svg>
   )
+}
+
+function ImageFrameGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect x="3.5" y="4" width="17" height="16" rx="3" />
+      <circle cx="9" cy="9" r="1.5" />
+      <path d="m6 17 4-4 3 3 2.5-2.5L18 16" />
+    </svg>
+  )
+}
+
+function producesImage(adapter: ModelAdapter): boolean {
+  const tags = new Set(adapter.metadata.tags.map((tag) => tag.toLowerCase()))
+  const searchable = `${adapter.metadata.name} ${adapter.metadata.description}`.toLowerCase()
+
+  return (
+    hasAny(tags, [
+      'generative',
+      'generation',
+      'image-generation',
+      'creative',
+      'restoration',
+      'inpainting',
+      'denoising',
+      'super-resolution',
+      'style-transfer',
+      'stylization',
+    ]) ||
+    /generat|restor|inpaint|denois|super[- ]?resolution|style transfer|styliz|esrgan|gfpgan|nafnet|swinir/.test(searchable)
+  )
+}
+
+function ModelGlyph({
+  adapter,
+  family,
+  className = '',
+}: {
+  adapter: ModelAdapter
+  family: ModelFamily
+  className?: string
+}) {
+  if (family === 'Vision & image' && producesImage(adapter)) {
+    return <ImageFrameGlyph className={className} />
+  }
+  return <FamilyGlyph family={family} className={className} />
 }
 
 function FilterGlyph({ filter, className = '' }: { filter: ModelFilter; className?: string }) {
@@ -341,7 +395,7 @@ export default function ModelList({
                 className="flex w-full flex-1 flex-col items-start px-3 pt-3 text-left disabled:opacity-55"
               >
                 <span className="model-card__icon mb-2 inline-flex h-8 w-8 items-center justify-center rounded-xl">
-                  <FamilyGlyph family={family} className="h-5 w-5" />
+                  <ModelGlyph adapter={adapter} family={family} className="h-5 w-5" />
                 </span>
                 <p className="break-words text-sm font-semibold leading-snug text-on-surface">
                   {adapter.metadata.name}
