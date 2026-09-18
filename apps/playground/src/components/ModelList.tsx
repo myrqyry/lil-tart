@@ -318,7 +318,7 @@ export default function ModelList({
 
   return (
     <div>
-      <div className="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1">
+      <div className="mb-2 flex items-center gap-1 overflow-x-auto pb-0.5">
         {FILTER_ORDER.map((filter) => {
           const count = counts.get(filter) ?? 0
           if (filter === 'Downloaded' && count === 0) return null
@@ -333,7 +333,7 @@ export default function ModelList({
               onClick={() => setActiveFilter(filter)}
               aria-label={FILTER_LABELS[filter]}
               title={FILTER_LABELS[filter]}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium transition-all ${
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[13px] font-medium transition-all ${
                 active
                   ? family
                     ? `border-current bg-surface-container-high ${FILTER_COLOR_CLASS[family]}`
@@ -343,15 +343,15 @@ export default function ModelList({
                     : 'border-transparent bg-surface-container-low/60 text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
               }`}
             >
-              <FilterGlyph filter={filter} className="h-4 w-4" />
-              <span className="text-[10px] opacity-60">{count}</span>
+              <FilterGlyph filter={filter} className="h-[17px] w-[17px]" />
+              <span className="text-xs opacity-60">{count}</span>
             </button>
           )
         })}
       </div>
 
       {searching && (
-        <p className="mb-2 text-xs text-on-surface-muted">
+        <p className="mb-2 text-[13px] text-on-surface-muted">
           {visibleItems.length} {visibleItems.length === 1 ? 'match' : 'matches'} across all types
         </p>
       )}
@@ -392,23 +392,23 @@ export default function ModelList({
                 type="button"
                 onClick={() => !isUnavailable && onSelect(adapter)}
                 disabled={isUnavailable && !isSelected}
-                className="flex w-full flex-1 flex-col items-start px-3 pt-3 text-left disabled:opacity-55"
+                className="flex w-full flex-1 flex-col items-start px-2.5 pt-2.5 text-left disabled:opacity-55"
               >
-                <span className="model-card__icon mb-2 inline-flex h-8 w-8 items-center justify-center rounded-xl">
-                  <ModelGlyph adapter={adapter} family={family} className="h-5 w-5" />
+                <span className="model-card__icon mb-1.5 inline-flex h-8 w-8 items-center justify-center rounded-lg">
+                  <ModelGlyph adapter={adapter} family={family} className="h-[19px] w-[19px]" />
                 </span>
-                <p className="break-words text-sm font-semibold leading-snug text-on-surface">
+                <p className="break-words text-[15px] font-semibold leading-[1.22] text-on-surface">
                   {adapter.metadata.name}
                 </p>
               </button>
 
               {isSelected && (
-                <div className="px-3 pb-2 pt-2">
-                  <p className="max-w-2xl text-xs leading-relaxed text-on-surface-variant">
+                <div className="px-2.5 pb-2 pt-1.5">
+                  <p className="max-w-2xl text-sm leading-snug text-on-surface-variant">
                     {adapter.metadata.description}
                   </p>
 
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
                     {adapter.metadata.tags.slice(0, 5).map((tag) => (
                       <span key={tag} className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-on-surface-variant">
                         {tag}
@@ -421,7 +421,7 @@ export default function ModelList({
                     )}
                   </div>
 
-                  <details className="mt-2 rounded-lg bg-surface/45 px-2.5 py-2 text-[10px] text-on-surface-variant">
+                  <details className="mt-1.5 rounded-md bg-surface/45 px-2 py-1.5 text-xs text-on-surface-variant">
                     <summary className="cursor-pointer select-none font-medium text-on-surface-muted">
                       Details
                     </summary>
@@ -454,14 +454,14 @@ export default function ModelList({
               )}
 
               {isLoading && downloadProgress && (
-                <div className="px-3 pb-2">
+                <div className="px-2.5 pb-1.5">
                   <div className="h-1.5 overflow-hidden rounded-full bg-outline-variant">
                     <div
                       className="h-full rounded-full bg-primary transition-all duration-300"
                       style={{ width: `${progressPercent(downloadProgress)}%` }}
                     />
                   </div>
-                  <p className="mt-1 text-[10px] text-on-surface-variant">
+                  <p className="mt-1 text-xs text-on-surface-variant">
                     {downloadProgress.totalBytes
                       ? `${progressPercent(downloadProgress)}% · ${formatBytes(downloadProgress.loadedBytes)} / ${formatBytes(downloadProgress.totalBytes)}`
                       : formatBytes(downloadProgress.loadedBytes)}
@@ -469,21 +469,21 @@ export default function ModelList({
                 </div>
               )}
 
-              <div className="mt-auto flex items-center justify-end px-2.5 pb-2 pt-1.5">
+              <div className="mt-auto flex items-center justify-end px-2.5 pb-2 pt-1">
                 {isLoaded && (
-                  <span className="mr-auto text-[10px] font-medium text-tertiary">● Loaded</span>
+                  <span className="mr-auto text-xs font-medium text-tertiary">● Loaded</span>
                 )}
                 {stored && !isLoaded && (
-                  <span className="mr-auto text-[10px] font-medium text-secondary">● Stored</span>
+                  <span className="mr-auto text-xs font-medium text-secondary">● Stored</span>
                 )}
                 {isUnavailable && (
-                  <span className="mr-auto text-[10px] text-on-surface-muted">Unavailable</span>
+                  <span className="mr-auto text-xs text-on-surface-muted">Unavailable</span>
                 )}
                 <button
                   type="button"
                   onClick={handleAction}
                   disabled={isUnavailable || isLoading || (!!disabled && !isLoaded)}
-                  className="model-card__action shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
+                  className="model-card__action shrink-0 rounded-md px-2.5 py-1 text-[13px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {actionLabel}
                 </button>
@@ -494,7 +494,7 @@ export default function ModelList({
                   type="button"
                   onClick={() => onRemoveStored(adapter.modelId)}
                   disabled={storageBusy || disabled}
-                  className="mx-3 mb-2 text-left text-[10px] font-medium text-error transition-opacity hover:opacity-80 disabled:opacity-40"
+                  className="mx-2.5 mb-2 text-left text-xs font-medium text-error transition-opacity hover:opacity-80 disabled:opacity-40"
                 >
                   Remove downloaded files
                 </button>
