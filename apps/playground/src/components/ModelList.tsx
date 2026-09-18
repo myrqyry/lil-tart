@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ModelAdapter, VerificationStatus } from '../adapters/types'
 
 interface StoredModelSummary {
@@ -9,8 +9,8 @@ interface StoredModelSummary {
 interface ModelListProps {
   adapters: ModelAdapter[]
   onSelect: (adapter: ModelAdapter) => void
-  onLoadSelected: () => void
-  onUnloadSelected: () => void
+  onLoad: (adapter: ModelAdapter) => void
+  onUnload: (adapter: ModelAdapter) => void
   onOpenPipeline?: (modelId: string) => void
   onRemoveStored: (modelId: string) => void
   disabled?: boolean
@@ -23,20 +23,15 @@ interface ModelListProps {
   searching?: boolean
 }
 
-const GROUP_ORDER = [
-  'On this device',
-  'Pipelines',
-  'Language',
-  'Speech & audio',
-  'Vision & image',
-  'Other',
-] as const
+const FAMILY_ORDER = ['Pipelines', 'Language', 'Speech & audio', 'Vision & image', 'Other'] as const
+type ModelFamily = typeof FAMILY_ORDER[number]
+type ModelFilter = 'All' | 'Downloaded' | ModelFamily
 
-type ModelGroup = typeof GROUP_ORDER[number]
-type ModelFamily = Exclude<ModelGroup, 'On this device'>
+const FILTER_ORDER: ModelFilter[] = ['All', 'Downloaded', ...FAMILY_ORDER]
 
-const GROUP_LABELS: Record<ModelGroup, string> = {
-  'On this device': 'Downloaded',
+const FILTER_LABELS: Record<ModelFilter, string> = {
+  All: 'All',
+  Downloaded: 'Downloaded',
   Pipelines: 'Pipelines',
   Language: 'Language',
   'Speech & audio': 'Audio',
@@ -52,46 +47,20 @@ const FAMILY_LABELS: Record<ModelFamily, string> = {
   Other: 'Other',
 }
 
-const FAMILY_CARD_CLASS: Record<ModelFamily, string> = {
-  Pipelines: 'border-type-pipeline/30 hover:border-type-pipeline/55',
-  Language: 'border-type-language/30 hover:border-type-language/55',
-  'Speech & audio': 'border-type-audio/30 hover:border-type-audio/55',
-  'Vision & image': 'border-type-vision/30 hover:border-type-vision/55',
-  Other: 'border-type-other/30 hover:border-type-other/55',
+const FAMILY_CLASS: Record<ModelFamily, string> = {
+  Pipelines: 'model-card--pipeline',
+  Language: 'model-card--language',
+  'Speech & audio': 'model-card--audio',
+  'Vision & image': 'model-card--vision',
+  Other: 'model-card--other',
 }
 
-const FAMILY_SELECTED_CLASS: Record<ModelFamily, string> = {
-  Pipelines: 'border-type-pipeline/70 bg-type-pipeline/8',
-  Language: 'border-type-language/70 bg-type-language/8',
-  'Speech & audio': 'border-type-audio/70 bg-type-audio/8',
-  'Vision & image': 'border-type-vision/70 bg-type-vision/8',
-  Other: 'border-type-other/70 bg-type-other/8',
-}
-
-const FAMILY_TEXT_CLASS: Record<ModelFamily, string> = {
+const FILTER_COLOR_CLASS: Record<ModelFamily, string> = {
   Pipelines: 'text-type-pipeline',
   Language: 'text-type-language',
   'Speech & audio': 'text-type-audio',
   'Vision & image': 'text-type-vision',
   Other: 'text-type-other',
-}
-
-const GROUP_TAB_CLASS: Record<ModelGroup, string> = {
-  'On this device': 'text-secondary hover:bg-secondary-container/35',
-  Pipelines: 'text-type-pipeline hover:bg-type-pipeline/10',
-  Language: 'text-type-language hover:bg-type-language/10',
-  'Speech & audio': 'text-type-audio hover:bg-type-audio/10',
-  'Vision & image': 'text-type-vision hover:bg-type-vision/10',
-  Other: 'text-type-other hover:bg-type-other/10',
-}
-
-const GROUP_ACTIVE_CLASS: Record<ModelGroup, string> = {
-  'On this device': 'bg-secondary-container text-on-secondary-container',
-  Pipelines: 'bg-type-pipeline/18 text-type-pipeline',
-  Language: 'bg-type-language/18 text-type-language',
-  'Speech & audio': 'bg-type-audio/18 text-type-audio',
-  'Vision & image': 'bg-type-vision/18 text-type-vision',
-  Other: 'bg-type-other/18 text-type-other',
 }
 
 const VERIFICATION_LABELS: Partial<Record<VerificationStatus, string>> = {
@@ -114,51 +83,67 @@ function progressPercent(progress: { loadedBytes: number; totalBytes?: number } 
   return Math.min(100, Math.round((progress.loadedBytes / progress.totalBytes) * 100))
 }
 
+function hasAny(tags: Set<string>, values: readonly string[]): boolean {
+  return values.some((value) => tags.has(value))
+}
+
 function familyFor(adapter: ModelAdapter): ModelFamily {
   if (adapter.isPipeline) return 'Pipelines'
 
   const tags = new Set(adapter.metadata.tags.map((tag) => tag.toLowerCase()))
-  if (
-    tags.has('llm') ||
-    tags.has('text') ||
-    tags.has('retrieval') ||
-    tags.has('encoder') ||
-    tags.has('embedding') ||
-    tags.has('classification')
-  ) return 'Language'
+  const searchable = `${adapter.metadata.name} ${adapter.metadata.description}`.toLowerCase()
 
+  // Specific modality evidence wins before generic tags like "embedding" or
+  // "classification". This keeps image embeddings out of Language and audio
+  // classifiers out of Language.
   if (
-    tags.has('audio') ||
-    tags.has('speech') ||
-    tags.has('tts') ||
-    tags.has('asr') ||
-    tags.has('music') ||
-    tags.has('codec')
+    hasAny(tags, ['audio', 'speech', 'tts', 'asr', 'music', 'codec', 'voice']) ||
+    /wav2vec|whisper|speech|audio|music|voice|tts|asr/.test(searchable)
   ) return 'Speech & audio'
 
   if (
-    tags.has('vision') ||
-    tags.has('image') ||
-    tags.has('ocr') ||
-    tags.has('segmentation') ||
-    tags.has('detection') ||
-    tags.has('depth') ||
-    tags.has('pose')
+    hasAny(tags, ['vision', 'image', 'ocr', 'segmentation', 'detection', 'depth', 'pose', 'restoration']) ||
+    /image|vision|ocr|segment|detect|depth|pose|clipseg|sam|yolo/.test(searchable)
   ) return 'Vision & image'
+
+  if (
+    hasAny(tags, ['llm', 'text', 'retrieval', 'encoder', 'embedding', 'classification', 'reranker']) ||
+    /text|language|embed|encoder|rerank|colbert|llm/.test(searchable)
+  ) return 'Language'
 
   return 'Other'
 }
 
-function defaultGroup(grouped: Map<ModelGroup, ModelAdapter[]>): ModelGroup {
-  if (grouped.get('Language')?.length) return 'Language'
-  return GROUP_ORDER.find((group) => grouped.get(group)?.length) ?? 'Other'
+function primaryTag(adapter: ModelAdapter, family: ModelFamily): string | null {
+  const familyWords = new Set([
+    'audio', 'speech', 'tts', 'asr', 'music', 'codec', 'voice',
+    'vision', 'image', 'ocr', 'segmentation', 'detection', 'depth', 'pose',
+    'llm', 'text', 'retrieval', 'encoder', 'embedding', 'classification',
+  ])
+  return adapter.metadata.tags.find((tag) => !familyWords.has(tag.toLowerCase())) ??
+    adapter.metadata.tags[0] ??
+    FAMILY_LABELS[family]
+}
+
+function modelActionLabel(
+  adapter: ModelAdapter,
+  isLoaded: boolean,
+  stored: StoredModelSummary | undefined,
+  isLoading: boolean,
+): string {
+  if (isLoading) return 'Downloading…'
+  if (adapter.disabled) return 'Unavailable'
+  if (adapter.isPipeline) return 'Open'
+  if (isLoaded) return 'Unload'
+  if (stored) return 'Load'
+  return 'Download'
 }
 
 export default function ModelList({
   adapters,
   onSelect,
-  onLoadSelected,
-  onUnloadSelected,
+  onLoad,
+  onUnload,
   onOpenPipeline,
   onRemoveStored,
   disabled,
@@ -170,78 +155,75 @@ export default function ModelList({
   storedModels = new Map(),
   searching = false,
 }: ModelListProps) {
-  const grouped = useMemo(() => {
-    const next = new Map<ModelGroup, ModelAdapter[]>()
-    for (const adapter of adapters) {
-      const family = familyFor(adapter)
-      const familyValues = next.get(family) ?? []
-      familyValues.push(adapter)
-      next.set(family, familyValues)
+  const [activeFilter, setActiveFilter] = useState<ModelFilter>('All')
 
-      if (storedModels.has(adapter.modelId)) {
-        const storedValues = next.get('On this device') ?? []
-        storedValues.push(adapter)
-        next.set('On this device', storedValues)
-      }
-    }
+  const families = useMemo(
+    () => new Map(adapters.map((adapter) => [adapter.modelId, familyFor(adapter)])),
+    [adapters],
+  )
 
-    for (const values of next.values()) {
-      values.sort((a, b) => a.metadata.name < b.metadata.name ? -1 : a.metadata.name > b.metadata.name ? 1 : 0)
+  const counts = useMemo(() => {
+    const next = new Map<ModelFilter, number>()
+    next.set('All', adapters.length)
+    next.set('Downloaded', adapters.filter((adapter) => storedModels.has(adapter.modelId)).length)
+    for (const family of FAMILY_ORDER) {
+      next.set(family, adapters.filter((adapter) => families.get(adapter.modelId) === family).length)
     }
     return next
-  }, [adapters, storedModels])
+  }, [adapters, families, storedModels])
 
-  const [activeGroup, setActiveGroup] = useState<ModelGroup>(() => defaultGroup(grouped))
+  const visibleItems = useMemo(() => {
+    const source = searching || activeFilter === 'All'
+      ? adapters
+      : activeFilter === 'Downloaded'
+        ? adapters.filter((adapter) => storedModels.has(adapter.modelId))
+        : adapters.filter((adapter) => families.get(adapter.modelId) === activeFilter)
 
-  useEffect(() => {
-    if (searching || !selectedModelId) return
-    const selected = adapters.find((adapter) => adapter.modelId === selectedModelId)
-    if (!selected) return
-
-    if (activeGroup === 'On this device' && storedModels.has(selected.modelId)) return
-    setActiveGroup(familyFor(selected))
-  }, [activeGroup, adapters, searching, selectedModelId, storedModels])
-
-  useEffect(() => {
-    if (!grouped.get(activeGroup)?.length) setActiveGroup(defaultGroup(grouped))
-  }, [activeGroup, grouped])
-
-  const visibleItems = searching ? adapters : grouped.get(activeGroup) ?? []
+    return [...source].sort((a, b) =>
+      a.metadata.name < b.metadata.name ? -1 : a.metadata.name > b.metadata.name ? 1 : 0
+    )
+  }, [activeFilter, adapters, families, searching, storedModels])
 
   return (
     <div>
-      {!searching && (
-        <div className="mb-2 flex gap-1 overflow-x-auto pb-1">
-          {GROUP_ORDER.map((group) => {
-            const count = grouped.get(group)?.length ?? 0
-            if (count === 0) return null
-            const active = activeGroup === group
+      <div className="mb-3 flex flex-wrap gap-1.5">
+        {FILTER_ORDER.map((filter) => {
+          const count = counts.get(filter) ?? 0
+          if (filter === 'Downloaded' && count === 0) return null
 
-            return (
-              <button
-                key={group}
-                type="button"
-                onClick={() => setActiveGroup(group)}
-                className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
-                  active ? GROUP_ACTIVE_CLASS[group] : GROUP_TAB_CLASS[group]
-                }`}
-              >
-                {GROUP_LABELS[group]} <span className="opacity-65">{count}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
+          const active = !searching && activeFilter === filter
+          const family = FAMILY_ORDER.includes(filter as ModelFamily) ? filter as ModelFamily : null
+
+          return (
+            <button
+              key={filter}
+              type="button"
+              onClick={() => setActiveFilter(filter)}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                active
+                  ? family
+                    ? `border-current bg-surface-container-high ${FILTER_COLOR_CLASS[family]}`
+                    : 'border-outline bg-surface-container-high text-on-surface'
+                  : family
+                    ? `border-transparent bg-surface-container-low/60 ${FILTER_COLOR_CLASS[family]} hover:bg-surface-container`
+                    : 'border-transparent bg-surface-container-low/60 text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
+              }`}
+            >
+              {FILTER_LABELS[filter]} <span className="opacity-60">{count}</span>
+            </button>
+          )
+        })}
+      </div>
 
       {searching && (
         <p className="mb-2 text-xs text-on-surface-muted">
-          {visibleItems.length} {visibleItems.length === 1 ? 'match' : 'matches'}
+          {visibleItems.length} {visibleItems.length === 1 ? 'match' : 'matches'} across all types
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-1.5 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {visibleItems.map((adapter) => {
-          const family = familyFor(adapter)
+          const family = families.get(adapter.modelId) ?? 'Other'
           const isLoading = loadingModelId === adapter.modelId
           const isSelected = selectedModelId === adapter.modelId
           const isLoaded = loadedModelId === adapter.modelId
@@ -249,46 +231,69 @@ export default function ModelList({
           const isUnavailable = !!adapter.disabled
           const verificationStatus = adapter.verification?.status ?? 'registered'
           const verificationLabel = VERIFICATION_LABELS[verificationStatus]
+          const actionLabel = modelActionLabel(adapter, isLoaded, stored, isLoading)
+
+          const handleAction = () => {
+            if (isUnavailable || isLoading) return
+            if (adapter.isPipeline) {
+              onOpenPipeline?.(adapter.modelId)
+              return
+            }
+            if (isLoaded) {
+              onUnload(adapter)
+              return
+            }
+            onLoad(adapter)
+          }
 
           return (
             <article
               key={adapter.modelId}
-              className={`overflow-hidden rounded-lg border bg-surface-container-low/70 transition-colors ${
-                isSelected
-                  ? `md:col-span-2 ${FAMILY_SELECTED_CLASS[family]}`
-                  : FAMILY_CARD_CLASS[family]
+              className={`model-card ${FAMILY_CLASS[family]} ${
+                isSelected ? 'model-card--selected sm:col-span-2 lg:col-span-3 xl:col-span-4' : ''
               }`}
             >
+              <div className="model-card__rail" />
+
               <button
                 type="button"
                 onClick={() => !isUnavailable && onSelect(adapter)}
-                disabled={isUnavailable || (!!disabled && !isSelected)}
-                title={isUnavailable ? 'No browser-fetchable .tflite yet — needs locating' : undefined}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left disabled:opacity-55"
+                disabled={isUnavailable && !isSelected}
+                className="block w-full px-3 pt-3 text-left disabled:opacity-55"
               >
-                <span className={`h-2 w-2 shrink-0 rounded-full bg-current ${FAMILY_TEXT_CLASS[family]}`} />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-xs font-semibold text-on-surface">{adapter.metadata.name}</p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="line-clamp-2 text-sm font-semibold leading-snug text-on-surface">
+                      {adapter.metadata.name}
+                    </p>
+                    {!isSelected && (
+                      <p className="mt-1 truncate text-[11px] text-on-surface-muted">
+                        {primaryTag(adapter, family)}
+                      </p>
+                    )}
+                  </div>
+                  <span className="model-card__type shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide">
+                    {FAMILY_LABELS[family]}
+                  </span>
                 </div>
-                <span className={`shrink-0 text-[9px] font-semibold uppercase tracking-wide ${FAMILY_TEXT_CLASS[family]}`}>
-                  {FAMILY_LABELS[family]}
-                </span>
-                {isLoading ? (
-                  <span className="shrink-0 text-[9px] font-medium text-primary">Downloading</span>
-                ) : isLoaded ? (
-                  <span className="shrink-0 text-[9px] font-medium text-tertiary">● Loaded</span>
-                ) : stored ? (
-                  <span className="shrink-0 text-[9px] font-medium text-secondary">● Stored</span>
-                ) : isUnavailable ? (
-                  <span className="shrink-0 text-[9px] text-on-surface-muted">Unavailable</span>
-                ) : null}
               </button>
 
               {isSelected && (
-                <div className="border-t border-outline-variant/60 px-3 pb-3 pt-2.5">
-                  <p className="max-w-3xl text-xs leading-relaxed text-on-surface-variant">
+                <div className="px-3 pb-2 pt-2">
+                  <p className="max-w-4xl text-xs leading-relaxed text-on-surface-variant">
                     {adapter.metadata.description}
                   </p>
+
+                  <div className="mt-2 grid gap-2 text-[10px] md:grid-cols-2">
+                    <div className="rounded-lg bg-surface/55 p-2">
+                      <p className="font-medium uppercase tracking-wide text-on-surface-muted">Model id</p>
+                      <p className="mt-0.5 break-all font-mono text-on-surface-variant">{adapter.modelId}</p>
+                    </div>
+                    <div className="rounded-lg bg-surface/55 p-2">
+                      <p className="font-medium uppercase tracking-wide text-on-surface-muted">Asset</p>
+                      <p className="mt-0.5 break-all font-mono text-on-surface-variant">{adapter.metadata.modelPath}</p>
+                    </div>
+                  </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
                     {adapter.metadata.tags.map((tag) => (
@@ -312,64 +317,59 @@ export default function ModelList({
                       </span>
                     )}
                   </div>
-
-                  {isLoading && downloadProgress && (
-                    <div className="mt-2.5 flex items-center gap-2">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-outline-variant">
-                        <div
-                          className="h-full rounded-full bg-primary transition-all duration-300"
-                          style={{ width: `${progressPercent(downloadProgress)}%` }}
-                        />
-                      </div>
-                      <span className="shrink-0 text-[10px] text-on-surface-variant">
-                        {downloadProgress.totalBytes
-                          ? `${progressPercent(downloadProgress)}% · ${formatBytes(downloadProgress.loadedBytes)} / ${formatBytes(downloadProgress.totalBytes)}`
-                          : formatBytes(downloadProgress.loadedBytes)}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {adapter.isPipeline ? (
-                      <button
-                        type="button"
-                        onClick={() => onOpenPipeline?.(adapter.modelId)}
-                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary"
-                      >
-                        Open pipeline
-                      </button>
-                    ) : isLoaded ? (
-                      <button
-                        type="button"
-                        onClick={onUnloadSelected}
-                        disabled={disabled}
-                        className="rounded-lg bg-surface-container-highest px-3 py-1.5 text-xs font-medium text-on-surface hover:bg-surface-bright disabled:opacity-50"
-                      >
-                        Unload from memory
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={onLoadSelected}
-                        disabled={disabled || isUnavailable}
-                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-on-primary disabled:opacity-50"
-                      >
-                        {stored ? 'Load from device' : 'Download & load'}
-                      </button>
-                    )}
-
-                    {stored && !adapter.isPipeline && (
-                      <button
-                        type="button"
-                        onClick={() => onRemoveStored(adapter.modelId)}
-                        disabled={storageBusy || disabled}
-                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
-                      >
-                        Remove download
-                      </button>
-                    )}
-                  </div>
                 </div>
+              )}
+
+              {isLoading && downloadProgress && (
+                <div className="px-3 pb-2">
+                  <div className="h-1.5 overflow-hidden rounded-full bg-outline-variant">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all duration-300"
+                      style={{ width: `${progressPercent(downloadProgress)}%` }}
+                    />
+                  </div>
+                  <p className="mt-1 text-[10px] text-on-surface-variant">
+                    {downloadProgress.totalBytes
+                      ? `${progressPercent(downloadProgress)}% · ${formatBytes(downloadProgress.loadedBytes)} / ${formatBytes(downloadProgress.totalBytes)}`
+                      : formatBytes(downloadProgress.loadedBytes)}
+                  </p>
+                </div>
+              )}
+
+              <div className="mt-auto flex items-center justify-between gap-2 border-t border-outline-variant/55 px-3 py-2">
+                <div className="min-w-0 text-[10px]">
+                  {isLoaded ? (
+                    <span className="font-medium text-tertiary">● Loaded</span>
+                  ) : stored ? (
+                    <span className="font-medium text-secondary">● Stored</span>
+                  ) : isUnavailable ? (
+                    <span className="text-on-surface-muted">Not located</span>
+                  ) : verificationLabel ? (
+                    <span className="text-on-surface-muted">{verificationLabel}</span>
+                  ) : (
+                    <span className="text-on-surface-muted">Ready to download</span>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleAction}
+                  disabled={isUnavailable || isLoading || (!!disabled && !isLoaded)}
+                  className="model-card__action shrink-0 rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {actionLabel}
+                </button>
+              </div>
+
+              {isSelected && stored && !adapter.isPipeline && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveStored(adapter.modelId)}
+                  disabled={storageBusy || disabled}
+                  className="mx-3 mb-2 text-[10px] font-medium text-error transition-opacity hover:opacity-80 disabled:opacity-40"
+                >
+                  Remove downloaded files
+                </button>
               )}
             </article>
           )
