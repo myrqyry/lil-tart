@@ -4,7 +4,7 @@ import { getTartGuideMessage, type TartGuideSnapshot } from './tartGuide'
 function snapshot(overrides: Partial<TartGuideSnapshot> = {}): TartGuideSnapshot {
   return {
     selectedModelName: null,
-    loading: false,
+    operation: 'idle',
     loaded: false,
     progressPercent: null,
     error: null,
@@ -12,7 +12,7 @@ function snapshot(overrides: Partial<TartGuideSnapshot> = {}): TartGuideSnapshot
     resolvedBackend: null,
     fallbackCount: 0,
     preflightComplete: false,
-    inferenceComplete: false,
+    pathProofAvailable: false,
     ...overrides,
   }
 }
@@ -28,13 +28,41 @@ describe('getTartGuideMessage', () => {
   it('reports model download progress', () => {
     const message = getTartGuideMessage(snapshot({
       selectedModelName: 'Tiny Model',
-      loading: true,
+      operation: 'model-load',
       progressPercent: 42,
     }))
 
     expect(message.tone).toBe('working')
     expect(message.title).toContain('Tiny Model')
     expect(message.message).toContain('42%')
+  })
+
+  it('describes preflight without pretending the model is downloading', () => {
+    const message = getTartGuideMessage(snapshot({
+      selectedModelName: 'Tiny Model',
+      operation: 'preflight',
+      loaded: true,
+      resolvedBackend: 'webgpu',
+      progressPercent: 100,
+    }))
+
+    expect(message.tone).toBe('working')
+    expect(message.title).toContain('preflight')
+    expect(message.message).not.toContain('Fetching')
+  })
+
+  it('describes real inference without pretending the model is compiling', () => {
+    const message = getTartGuideMessage(snapshot({
+      selectedModelName: 'Tiny Model',
+      operation: 'inference',
+      loaded: true,
+      resolvedBackend: 'webgpu',
+      progressPercent: 100,
+    }))
+
+    expect(message.tone).toBe('working')
+    expect(message.kicker).toBe('Real inference')
+    expect(message.message).not.toContain('Fetching')
   })
 
   it('offers preflight after a clean load', () => {
@@ -56,7 +84,7 @@ describe('getTartGuideMessage', () => {
       requestedBackend: 'webgpu',
       resolvedBackend: 'wasm',
       fallbackCount: 1,
-      inferenceComplete: true,
+      pathProofAvailable: true,
     }))
 
     expect(message.tone).toBe('warning')
@@ -71,18 +99,18 @@ describe('getTartGuideMessage', () => {
       loaded: true,
       resolvedBackend: 'webgpu',
       preflightComplete: true,
-      inferenceComplete: true,
+      pathProofAvailable: true,
     }))
 
     expect(message.tone).toBe('success')
     expect(message.kicker).toBe('Inference complete')
-    expect(message.message).toContain('working path')
+    expect(message.message).toContain('session path')
   })
 
   it('gives runtime errors top priority', () => {
     const message = getTartGuideMessage(snapshot({
       selectedModelName: 'Tiny Model',
-      loading: true,
+      operation: 'model-load',
       error: 'Graph compile failed',
     }))
 
