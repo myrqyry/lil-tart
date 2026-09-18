@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createHttpAssetResolver } from '@litert-playground/inference-core'
 import {
   createLiteRtRuntime,
   type BackendPreference,
@@ -10,6 +9,7 @@ import {
 } from '@litert-playground/runtime-litert'
 import type { Tensor } from '@litertjs/core'
 import type { InferenceContext, ModelAdapter, TensorSpec } from '../adapters/types'
+import { createModelLibraryAssetResolver, registerModelAssets } from '../modelStorage'
 
 export type Accelerator = BackendPreference
 
@@ -20,6 +20,7 @@ export interface RawTensor {
 
 interface UseModelRunnerReturn {
   loadModel: (adapter: ModelAdapter, accelerator?: Accelerator) => Promise<void>
+  unloadModel: () => Promise<void>
   runInference: (values: Record<string, unknown>) => Promise<void>
   preflightModel: () => Promise<void>
   outputs: Record<string, unknown> | null
@@ -92,7 +93,7 @@ export function useModelRunner(): UseModelRunnerReturn {
     if (!runtimePromiseRef.current) {
       runtimePromiseRef.current = createLiteRtRuntime({
         backend: 'auto',
-        assets: createHttpAssetResolver(modelBase),
+        assets: createModelLibraryAssetResolver(modelBase),
         telemetryLimit: 256,
       }).catch((cause) => {
         runtimePromiseRef.current = null
@@ -125,6 +126,8 @@ export function useModelRunner(): UseModelRunnerReturn {
     setDownloadProgress(null)
 
     try {
+      const graphPaths = [adapter.metadata.modelPath, ...(adapter.graphs ?? []).map((graph) => graph.modelPath)]
+      registerModelAssets(adapter.modelId, graphPaths)
       const runtime = await ensureRuntime()
       const previous = adapterRef.current
       if (previous) {
@@ -132,7 +135,6 @@ export function useModelRunner(): UseModelRunnerReturn {
         previous.graphs?.forEach((graph) => runtime.liteRt.disposeModel(graph.modelPath))
       }
 
-      const graphPaths = [adapter.metadata.modelPath, ...(adapter.graphs ?? []).map((graph) => graph.modelPath)]
       for (const modelPath of graphPaths) {
         await runtime.liteRt.loadModel(modelPath, {
           accelerator: target,
@@ -160,6 +162,38 @@ export function useModelRunner(): UseModelRunnerReturn {
       if (requestId === requestIdRef.current) setLoading(false)
     }
   }, [accelerator, ensureRuntime, refreshRuntimeState])
+
+  const unloadModel = useCallback(async () => {
+    requestIdRef.current += 1
+    loadControllerRef.current?.abort()
+    loadControllerRef.current = null
+
+    const adapter = adapterRef.current
+    adapterRef.current = null
+
+    setLoading(false)
+    setLoaded(false)
+    setModelInfo(null)
+    setResolvedAccelerator(null)
+    setPreflight(null)
+    setOutputs(null)
+    setOutputTensors(null)
+    setOutputSpecs([])
+    setError(null)
+    setDownloadProgress(null)
+
+    const runtimePromise = runtimePromiseRef.current
+    if (!runtimePromise || !adapter) return
+
+    try {
+      const runtime = await runtimePromise
+      runtime.liteRt.disposeModel(adapter.metadata.modelPath)
+      adapter.graphs?.forEach((graph) => runtime.liteRt.disposeModel(graph.modelPath))
+      setTelemetry(runtime.liteRt.getTelemetry())
+    } catch {
+      // The runtime may have failed before a model became disposable.
+    }
+  }, [])
 
   const runInference = useCallback(async (values: Record<string, unknown>) => {
     const adapter = adapterRef.current
@@ -282,6 +316,7 @@ export function useModelRunner(): UseModelRunnerReturn {
 
   return {
     loadModel,
+    unloadModel,
     runInference,
     preflightModel,
     outputs,
