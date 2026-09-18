@@ -1,35 +1,49 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: oklch(0.72 0.14 330);
-  --color-on-primary: oklch(0.22 0.08 330);
-  --color-primary-container: oklch(0.3 0.1 330);
-  --color-on-primary-container: oklch(0.85 0.06 330);
+  /* Jam: actions and selected state. */
+  --color-primary: oklch(0.72 0.15 350);
+  --color-on-primary: oklch(0.2 0.055 350);
+  --color-primary-container: oklch(0.31 0.075 350);
+  --color-on-primary-container: oklch(0.9 0.045 350);
 
-  --color-secondary: oklch(0.72 0.08 170);
-  --color-on-secondary: oklch(0.22 0.04 170);
-  --color-secondary-container: oklch(0.3 0.06 170);
-  --color-on-secondary-container: oklch(0.85 0.04 170);
+  /* Crust: stored/local state. */
+  --color-secondary: oklch(0.76 0.095 76);
+  --color-on-secondary: oklch(0.22 0.035 68);
+  --color-secondary-container: oklch(0.31 0.045 72);
+  --color-on-secondary-container: oklch(0.89 0.045 78);
 
-  --color-tertiary: oklch(0.78 0.08 60);
-  --color-on-tertiary: oklch(0.28 0.04 60);
+  /* Sage: verified/healthy secondary signal. */
+  --color-tertiary: oklch(0.73 0.085 154);
+  --color-on-tertiary: oklch(0.2 0.035 154);
+  --color-tertiary-container: oklch(0.29 0.05 154);
+  --color-on-tertiary-container: oklch(0.88 0.04 154);
 
-  --color-surface: oklch(0.14 0.02 300);
-  --color-surface-dim: oklch(0.12 0.02 300);
-  --color-surface-bright: oklch(0.22 0.02 300);
-  --color-surface-container: oklch(0.18 0.02 300);
-  --color-surface-container-low: oklch(0.16 0.02 300);
-  --color-surface-container-high: oklch(0.22 0.02 300);
-  --color-on-surface: oklch(0.92 0.01 300);
-  --color-on-surface-variant: oklch(0.7 0.02 300);
+  /*
+   * Surfaces deliberately span a wider lightness range. The previous ladder
+   * was so compressed that cards, page background, hover and elevation all
+   * rendered as effectively the same purple-black.
+   */
+  --color-surface-dim: oklch(0.095 0.012 330);
+  --color-surface: oklch(0.125 0.014 330);
+  --color-surface-container-lowest: oklch(0.14 0.015 330);
+  --color-surface-container-low: oklch(0.165 0.017 330);
+  --color-surface-container: oklch(0.195 0.02 330);
+  --color-surface-container-high: oklch(0.235 0.024 330);
+  --color-surface-container-highest: oklch(0.28 0.027 330);
+  --color-surface-bright: oklch(0.34 0.03 330);
 
-  --color-outline: oklch(0.55 0.02 300);
-  --color-outline-variant: oklch(0.3 0.02 300);
+  --color-on-surface: oklch(0.94 0.012 330);
+  --color-on-surface-variant: oklch(0.72 0.022 330);
+  --color-on-surface-muted: oklch(0.58 0.02 330);
 
-  --color-error: oklch(0.72 0.15 30);
-  --color-on-error: oklch(0.22 0.08 30);
-  --color-error-container: oklch(0.3 0.1 30);
-  --color-on-error-container: oklch(0.85 0.06 30);
+  --color-outline: oklch(0.43 0.025 330);
+  --color-outline-variant: oklch(0.29 0.02 330);
+
+  --color-error: oklch(0.72 0.15 28);
+  --color-on-error: oklch(0.22 0.07 28);
+  --color-error-container: oklch(0.3 0.08 28);
+  --color-on-error-container: oklch(0.88 0.05 28);
 
   --radius-sm: 0.5rem;
   --radius-md: 0.75rem;
@@ -45,4 +59,13 @@
 html {
   background-color: var(--color-surface-dim);
   color: var(--color-on-surface);
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background:
+    radial-gradient(circle at 15% -10%, oklch(0.25 0.045 350 / 0.18), transparent 32rem),
+    radial-gradient(circle at 90% 8%, oklch(0.25 0.04 76 / 0.1), transparent 28rem),
+    var(--color-surface-dim);
 }
