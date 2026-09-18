@@ -171,9 +171,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     () => new Map(storedModels.map((model) => [model.modelId, model])),
     [storedModels],
   )
-  const storedModelIds = useMemo(() => new Set(storedModelMap.keys()), [storedModelMap])
   const selectedLoaded = !!selectedAdapter && !selectedAdapter.isPipeline && loaded && loadedModelId === selectedAdapter.modelId
-  const selectedStored = selectedAdapter ? storedModelMap.get(selectedAdapter.modelId) : undefined
   const storedBytes = storedModels.reduce((total, model) => total + model.bytes, 0)
   const recentTelemetry = telemetry.slice(-4).reverse()
   const tartGuide = getTartGuideMessage({
@@ -191,20 +189,20 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
 
   return (
     <div className="min-h-screen bg-surface-dim">
-      <div className="mx-auto p-6" style={{ maxWidth: 900 }}>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mx-auto px-4 py-4 md:px-6" style={{ maxWidth: 1080 }}>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-on-surface">Lil Tart</h1>
-            <p className="mt-1 text-sm text-on-surface-variant">
-              Browse first. Download only what you choose, then prove the runtime path locally.
+            <h1 className="text-2xl font-bold text-on-surface">Lil Tart</h1>
+            <p className="mt-0.5 text-xs text-on-surface-variant">
+              Pick a model. Nothing downloads until you say so.
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs text-on-surface-variant">Accelerator:</label>
+            <label className="text-[10px] font-medium uppercase tracking-wide text-on-surface-muted">Accelerator</label>
             <select
               value={accelerator}
               onChange={e => handleAcceleratorChange(e.target.value as Accelerator)}
-              className="rounded-lg border border-outline bg-surface-container px-2 py-1 text-xs text-on-surface"
+              className="rounded-lg border border-outline-variant bg-surface-container-high px-2 py-1 text-xs text-on-surface"
             >
               {ACCEL_OPTIONS.map(o => (
                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -215,117 +213,67 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
 
         <input
           type="text"
-          placeholder="Search models..."
+          placeholder="Search name, task, or model id…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          className="mb-3 w-full rounded-lg border border-outline bg-surface-container px-4 py-2 text-sm text-on-surface transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
+          className="mb-2 w-full rounded-lg border border-outline-variant bg-surface-container-low px-3 py-2 text-sm text-on-surface placeholder:text-on-surface-muted transition-colors focus:border-primary focus:bg-surface-container focus:ring-2 focus:ring-primary/20 focus:outline-none"
         />
 
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-outline/40 bg-surface-container-low p-3">
-          <div>
-            <p className="text-xs font-semibold text-on-surface">Model library</p>
-            <p className="mt-0.5 text-[11px] text-on-surface-variant">
-              {storedModels.length} stored · {formatBytes(storedBytes)}
-            </p>
-          </div>
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-lg border border-outline-variant/70 bg-surface-container-lowest px-3 py-2 text-[11px] text-on-surface-variant">
+          <span>
+            <strong className="font-medium text-on-surface">{storedModels.length}</strong> downloaded
+            <span className="mx-1.5 text-outline">·</span>
+            {formatBytes(storedBytes)}
+          </span>
+
           {storedModels.length > 0 && (
             <button
               type="button"
               onClick={() => void handleClearStored()}
               disabled={storageBusy || loading}
-              className="rounded-full border border-outline px-3 py-1.5 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-50"
+              className="rounded-md px-2 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
             >
-              Clear all downloads
+              Clear all
             </button>
           )}
-        </div>
 
-        <details className="mb-4 rounded-xl border border-outline/40 bg-surface-container-low px-3 py-2">
-          <summary className="cursor-pointer text-xs font-medium text-on-surface-variant">Runtime settings</summary>
-          <div className="mt-3">
-            <label className="mb-1 block text-xs font-medium text-on-surface-variant">Model server base URL</label>
-            <input
-              type="url"
-              placeholder="https://your-model-server.com/"
-              value={modelBaseInput}
-              onChange={e => setModelBaseInput(e.target.value)}
-              onBlur={commitModelBase}
-              onKeyDown={e => { if (e.key === 'Enter') commitModelBase() }}
-              className="w-full rounded-lg border border-outline bg-surface-container px-4 py-2 text-sm text-on-surface transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
-            />
-          </div>
-        </details>
+          <details className="ml-auto">
+            <summary className="cursor-pointer select-none rounded-md px-2 py-1 transition-colors hover:bg-surface-container-high hover:text-on-surface">
+              Runtime settings
+            </summary>
+            <div className="mt-2 min-w-[18rem] rounded-lg border border-outline-variant bg-surface-container-high p-2 shadow-xl">
+              <label className="mb-1 block text-[10px] font-medium uppercase tracking-wide text-on-surface-muted">
+                Model server base URL
+              </label>
+              <input
+                type="url"
+                placeholder="https://your-model-server.com/"
+                value={modelBaseInput}
+                onChange={e => setModelBaseInput(e.target.value)}
+                onBlur={commitModelBase}
+                onKeyDown={e => { if (e.key === 'Enter') commitModelBase() }}
+                className="w-full rounded-md border border-outline-variant bg-surface px-2.5 py-1.5 text-xs text-on-surface focus:border-primary focus:outline-none"
+              />
+            </div>
+          </details>
+        </div>
 
         <ModelList
           adapters={filtered}
           onSelect={handleSelect}
+          onLoadSelected={() => void handleLoadSelected()}
+          onUnloadSelected={() => void handleUnload()}
+          onOpenPipeline={(modelId) => onSelect?.(modelId)}
+          onRemoveStored={(modelId) => void handleRemoveStored(modelId)}
           disabled={loading}
+          storageBusy={storageBusy}
           loadingModelId={downloadingId}
           downloadProgress={downloadingId === selectedAdapter?.modelId ? downloadProgress : null}
           selectedModelId={selectedAdapter?.modelId ?? null}
           loadedModelId={loaded && loadedModelId ? loadedModelId : null}
-          storedModelIds={storedModelIds}
+          storedModels={storedModelMap}
+          searching={search.trim().length > 0}
         />
-
-        {selectedAdapter && (
-          <section className="mt-5 rounded-2xl border border-outline/50 bg-surface-container p-4">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
-                  Selected
-                </p>
-                <h2 className="mt-1 text-lg font-semibold text-on-surface">{selectedAdapter.metadata.name}</h2>
-                <p className="mt-1 text-sm text-on-surface-variant">{selectedAdapter.metadata.description}</p>
-                {selectedStored && (
-                  <p className="mt-2 text-xs text-on-surface-variant">
-                    Stored locally · {formatBytes(selectedStored.bytes)} across {selectedStored.assets} {selectedStored.assets === 1 ? 'asset' : 'assets'}
-                  </p>
-                )}
-              </div>
-
-              <div className="flex flex-wrap justify-end gap-2">
-                {selectedAdapter.isPipeline ? (
-                  <button
-                    type="button"
-                    onClick={() => onSelect?.(selectedAdapter.modelId)}
-                    className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-on-primary"
-                  >
-                    Open pipeline
-                  </button>
-                ) : selectedLoaded ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleUnload()}
-                    disabled={loading}
-                    className="rounded-full border border-outline px-4 py-2 text-xs font-medium text-on-surface hover:bg-surface-container-high disabled:opacity-50"
-                  >
-                    Unload from memory
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void handleLoadSelected()}
-                    disabled={loading || !!selectedAdapter.disabled}
-                    className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-on-primary disabled:opacity-50"
-                  >
-                    {selectedStored ? 'Load from device' : 'Download & load'}
-                  </button>
-                )}
-
-                {selectedStored && !selectedAdapter.isPipeline && (
-                  <button
-                    type="button"
-                    onClick={() => void handleRemoveStored(selectedAdapter.modelId)}
-                    disabled={storageBusy || loading}
-                    className="rounded-full border border-error/50 px-4 py-2 text-xs font-medium text-error hover:bg-error-container/30 disabled:opacity-50"
-                  >
-                    Remove download
-                  </button>
-                )}
-              </div>
-            </div>
-          </section>
-        )}
 
         {error && (
           <div className="mt-3 rounded-lg bg-error-container p-3 text-sm text-on-error-container">
