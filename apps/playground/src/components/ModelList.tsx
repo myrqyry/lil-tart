@@ -221,7 +221,7 @@ export default function ModelList({
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className="model-grid">
         {visibleItems.map((adapter) => {
           const family = families.get(adapter.modelId) ?? 'Other'
           const isLoading = loadingModelId === adapter.modelId
@@ -249,9 +249,7 @@ export default function ModelList({
           return (
             <article
               key={adapter.modelId}
-              className={`model-card ${FAMILY_CLASS[family]} ${
-                isSelected ? 'model-card--selected sm:col-span-2 lg:col-span-3 xl:col-span-4' : ''
-              }`}
+              className={`model-card ${FAMILY_CLASS[family]} ${isSelected ? 'model-card--selected' : ''}`}
             >
               <div className="model-card__rail" />
 
