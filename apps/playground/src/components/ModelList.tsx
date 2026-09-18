@@ -392,12 +392,12 @@ export default function ModelList({
                 type="button"
                 onClick={() => !isUnavailable && onSelect(adapter)}
                 disabled={isUnavailable && !isSelected}
-                className="flex w-full flex-1 flex-col items-start px-2.5 pt-2.5 text-left disabled:opacity-55"
+                className="flex w-full flex-1 items-start gap-2 px-2 pt-2 text-left disabled:opacity-55"
               >
-                <span className="model-card__icon mb-1.5 inline-flex h-8 w-8 items-center justify-center rounded-lg">
-                  <ModelGlyph adapter={adapter} family={family} className="h-[19px] w-[19px]" />
+                <span className="model-card__icon inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md">
+                  <ModelGlyph adapter={adapter} family={family} className="h-[17px] w-[17px]" />
                 </span>
-                <p className="break-words text-[15px] font-semibold leading-[1.22] text-on-surface">
+                <p className="min-w-0 break-words pt-0.5 text-[15px] font-semibold leading-[1.2] text-on-surface">
                   {adapter.metadata.name}
                 </p>
               </button>
