@@ -83,7 +83,7 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
       tone: 'success',
       kicker: 'Inference complete',
       title: 'That’s a real working path. ✨',
-      message: `The model just ran locally on ${backendLabel(snapshot.resolvedBackend)}. This is the configuration we eventually want to turn into an “add this to my app” recipe.`,
+      message: `The model just ran locally on ${backendLabel(snapshot.resolvedBackend)}. That gives us a real working path we can eventually turn into an “add this to my app” recipe.`,
     }
   }
 
