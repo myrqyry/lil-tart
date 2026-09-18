@@ -30,7 +30,7 @@ type ModelFilter = 'All' | 'Downloaded' | ModelFamily
 const FILTER_ORDER: ModelFilter[] = ['All', 'Downloaded', ...FAMILY_ORDER]
 
 const FILTER_LABELS: Record<ModelFilter, string> = {
-  All: 'All',
+  All: 'All models',
   Downloaded: 'Downloaded',
   Pipelines: 'Pipelines',
   Language: 'Language',
@@ -75,6 +75,106 @@ function progressPercent(progress: { loadedBytes: number; totalBytes?: number } 
   return Math.min(100, Math.round((progress.loadedBytes / progress.totalBytes) * 100))
 }
 
+function FamilyGlyph({ family, className = '' }: { family: ModelFamily; className?: string }) {
+  const common = {
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    className,
+    'aria-hidden': true,
+  }
+
+  if (family === 'Speech & audio') {
+    return (
+      <svg {...common}>
+        <path d="M4 13v-2M8 16V8m4 11V5m4 11V8m4 5v-2" />
+      </svg>
+    )
+  }
+
+  if (family === 'Vision & image') {
+    return (
+      <svg {...common}>
+        <rect x="3.5" y="4" width="17" height="16" rx="3" />
+        <circle cx="9" cy="9" r="1.5" />
+        <path d="m6 17 4-4 3 3 2.5-2.5L18 16" />
+      </svg>
+    )
+  }
+
+  if (family === 'Language') {
+    return (
+      <svg {...common}>
+        <path d="M5 6h14M8 6v12m8-12v12M5 18h14" />
+      </svg>
+    )
+  }
+
+  if (family === 'Pipelines') {
+    return (
+      <svg {...common}>
+        <circle cx="6" cy="6" r="2" />
+        <circle cx="18" cy="6" r="2" />
+        <circle cx="12" cy="18" r="2" />
+        <path d="M7.7 7.1 10.8 16M16.3 7.1 13.2 16M8 6h8" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg {...common}>
+      <rect x="4" y="4" width="6" height="6" rx="1.5" />
+      <rect x="14" y="4" width="6" height="6" rx="1.5" />
+      <rect x="4" y="14" width="6" height="6" rx="1.5" />
+      <path d="M17 14v6m-3-3h6" />
+    </svg>
+  )
+}
+
+function FilterGlyph({ filter, className = '' }: { filter: ModelFilter; className?: string }) {
+  if (FAMILY_ORDER.includes(filter as ModelFamily)) {
+    return <FamilyGlyph family={filter as ModelFamily} className={className} />
+  }
+
+  if (filter === 'Downloaded') {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className={className}
+        aria-hidden
+      >
+        <path d="M12 4v10m-4-4 4 4 4-4M5 19h14" />
+      </svg>
+    )
+  }
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <rect x="4" y="4" width="6" height="6" rx="1.5" />
+      <rect x="14" y="4" width="6" height="6" rx="1.5" />
+      <rect x="4" y="14" width="6" height="6" rx="1.5" />
+      <rect x="14" y="14" width="6" height="6" rx="1.5" />
+    </svg>
+  )
+}
+
 function hasAny(tags: Set<string>, values: readonly string[]): boolean {
   return values.some((value) => tags.has(value))
 }
@@ -85,9 +185,6 @@ function familyFor(adapter: ModelAdapter): ModelFamily {
   const tags = new Set(adapter.metadata.tags.map((tag) => tag.toLowerCase()))
   const searchable = `${adapter.metadata.name} ${adapter.metadata.description}`.toLowerCase()
 
-  // Specific modality evidence wins before generic tags like "embedding" or
-  // "classification". This keeps image embeddings out of Language and audio
-  // classifiers out of Language.
   if (
     hasAny(tags, ['audio', 'speech', 'tts', 'asr', 'music', 'codec', 'voice']) ||
     /wav2vec|whisper|speech|audio|music|voice|tts|asr/.test(searchable)
@@ -167,7 +264,7 @@ export default function ModelList({
 
   return (
     <div>
-      <div className="mb-3 flex flex-wrap gap-1.5">
+      <div className="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1">
         {FILTER_ORDER.map((filter) => {
           const count = counts.get(filter) ?? 0
           if (filter === 'Downloaded' && count === 0) return null
@@ -180,7 +277,9 @@ export default function ModelList({
               key={filter}
               type="button"
               onClick={() => setActiveFilter(filter)}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+              aria-label={FILTER_LABELS[filter]}
+              title={FILTER_LABELS[filter]}
+              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-xs font-medium transition-all ${
                 active
                   ? family
                     ? `border-current bg-surface-container-high ${FILTER_COLOR_CLASS[family]}`
@@ -190,7 +289,8 @@ export default function ModelList({
                     : 'border-transparent bg-surface-container-low/60 text-on-surface-variant hover:bg-surface-container hover:text-on-surface'
               }`}
             >
-              {FILTER_LABELS[filter]} <span className="opacity-60">{count}</span>
+              <FilterGlyph filter={filter} className="h-4 w-4" />
+              <span className="text-[10px] opacity-60">{count}</span>
             </button>
           )
         })}
@@ -238,8 +338,11 @@ export default function ModelList({
                 type="button"
                 onClick={() => !isUnavailable && onSelect(adapter)}
                 disabled={isUnavailable && !isSelected}
-                className="block w-full flex-1 px-3 pt-3 text-left disabled:opacity-55"
+                className="flex w-full flex-1 flex-col items-start px-3 pt-3 text-left disabled:opacity-55"
               >
+                <span className="model-card__icon mb-2 inline-flex h-8 w-8 items-center justify-center rounded-xl">
+                  <FamilyGlyph family={family} className="h-5 w-5" />
+                </span>
                 <p className="break-words text-sm font-semibold leading-snug text-on-surface">
                   {adapter.metadata.name}
                 </p>
@@ -247,46 +350,52 @@ export default function ModelList({
 
               {isSelected && (
                 <div className="px-3 pb-2 pt-2">
-                  <p className="max-w-4xl text-xs leading-relaxed text-on-surface-variant">
+                  <p className="max-w-2xl text-xs leading-relaxed text-on-surface-variant">
                     {adapter.metadata.description}
                   </p>
 
-                  <div className="mt-2 grid gap-2 text-[10px] md:grid-cols-2">
-                    <div className="rounded-lg bg-surface/55 p-2">
-                      <p className="font-medium uppercase tracking-wide text-on-surface-muted">Model id</p>
-                      <p className="mt-0.5 break-all font-mono text-on-surface-variant">{adapter.modelId}</p>
-                    </div>
-                    <div className="rounded-lg bg-surface/55 p-2">
-                      <p className="font-medium uppercase tracking-wide text-on-surface-muted">Asset</p>
-                      <p className="mt-0.5 break-all font-mono text-on-surface-variant">{adapter.metadata.modelPath}</p>
-                    </div>
-                  </div>
-
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
-                    <span className="model-card__type rounded-md px-1.5 py-0.5 font-semibold">
-                      {FILTER_LABELS[family]}
-                    </span>
-                    {adapter.metadata.tags.map((tag) => (
+                    {adapter.metadata.tags.slice(0, 5).map((tag) => (
                       <span key={tag} className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-on-surface-variant">
                         {tag}
                       </span>
                     ))}
-                    {verificationLabel && (
-                      <span className="rounded-md bg-tertiary-container/70 px-1.5 py-0.5 text-on-tertiary-container">
-                        {verificationLabel}
-                      </span>
-                    )}
-                    {adapter.verification?.backends?.map((backend) => (
-                      <span key={backend} className="rounded-md bg-surface-container-highest px-1.5 py-0.5 text-on-surface-variant">
-                        {backend.toUpperCase()}
-                      </span>
-                    ))}
                     {stored && (
                       <span className="rounded-md bg-secondary-container/70 px-1.5 py-0.5 text-on-secondary-container">
-                        {formatBytes(stored.bytes)} · {stored.assets} {stored.assets === 1 ? 'asset' : 'assets'}
+                        {formatBytes(stored.bytes)} stored
                       </span>
                     )}
                   </div>
+
+                  <details className="mt-2 rounded-lg bg-surface/45 px-2.5 py-2 text-[10px] text-on-surface-variant">
+                    <summary className="cursor-pointer select-none font-medium text-on-surface-muted">
+                      Details
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <div>
+                        <p className="uppercase tracking-wide text-on-surface-muted">Model id</p>
+                        <p className="mt-0.5 break-all font-mono">{adapter.modelId}</p>
+                      </div>
+                      <div>
+                        <p className="uppercase tracking-wide text-on-surface-muted">Asset</p>
+                        <p className="mt-0.5 break-all font-mono">{adapter.metadata.modelPath}</p>
+                      </div>
+                      {(verificationLabel || adapter.verification?.backends?.length) && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {verificationLabel && (
+                            <span className="rounded-md bg-tertiary-container/70 px-1.5 py-0.5 text-on-tertiary-container">
+                              {verificationLabel}
+                            </span>
+                          )}
+                          {adapter.verification?.backends?.map((backend) => (
+                            <span key={backend} className="rounded-md bg-surface-container-highest px-1.5 py-0.5">
+                              {backend.toUpperCase()}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </details>
                 </div>
               )}
 
@@ -306,17 +415,21 @@ export default function ModelList({
                 </div>
               )}
 
-              <div className="mt-auto flex items-center justify-end border-t border-outline-variant/45 px-2.5 py-1.5">
-                {isLoading && (
-                  <span className="mr-auto text-[10px] font-medium text-primary">
-                    Downloading…
-                  </span>
+              <div className="mt-auto flex items-center justify-end px-2.5 pb-2 pt-1.5">
+                {isLoaded && (
+                  <span className="mr-auto text-[10px] font-medium text-tertiary">● Loaded</span>
+                )}
+                {stored && !isLoaded && (
+                  <span className="mr-auto text-[10px] font-medium text-secondary">● Stored</span>
+                )}
+                {isUnavailable && (
+                  <span className="mr-auto text-[10px] text-on-surface-muted">Unavailable</span>
                 )}
                 <button
                   type="button"
                   onClick={handleAction}
                   disabled={isUnavailable || isLoading || (!!disabled && !isLoaded)}
-                  className="model-card__action shrink-0 rounded-md px-2.5 py-1 text-[10px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
+                  className="model-card__action shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {actionLabel}
                 </button>
@@ -327,7 +440,7 @@ export default function ModelList({
                   type="button"
                   onClick={() => onRemoveStored(adapter.modelId)}
                   disabled={storageBusy || disabled}
-                  className="mx-3 mb-2 text-[10px] font-medium text-error transition-opacity hover:opacity-80 disabled:opacity-40"
+                  className="mx-3 mb-2 text-left text-[10px] font-medium text-error transition-opacity hover:opacity-80 disabled:opacity-40"
                 >
                   Remove downloaded files
                 </button>
