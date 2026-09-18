@@ -81,7 +81,7 @@ body {
 .model-card {
   --model-type: var(--color-type-other);
   display: flex;
-  min-height: 6.6rem;
+  min-height: 5.4rem;
   flex-direction: column;
   overflow: hidden;
   border: 1px solid color-mix(in oklab, var(--model-type) 34%, var(--color-outline-variant));
@@ -171,20 +171,13 @@ body {
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
-  grid-auto-flow: dense;
+  grid-template-columns: repeat(auto-fill, minmax(14.5rem, 1fr));
   gap: 0.5rem;
   align-items: stretch;
 }
 
 .model-card--selected {
   grid-column: span 2;
-}
-
-@media (min-width: 900px) {
-  .model-card--selected {
-    grid-column: span 3;
-  }
 }
 
 @media (max-width: 560px) {
