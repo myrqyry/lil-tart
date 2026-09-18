@@ -92,6 +92,66 @@ describe('capability provider resolution', () => {
     ])
   })
 
+  it('scopes verification evidence to the selected backend', () => {
+    const webGpuOnlyVerification = verification('output')!
+    webGpuOnlyVerification.environments = [
+      { browser: 'Chrome', backend: 'webgpu', runtime: 'LiteRT.js' },
+    ]
+
+    const wasm = resolveCapabilityProvider(
+      {
+        capability: 'text-generation',
+        backends: ['wasm'],
+        minimumVerification: 'output',
+      },
+      [
+        provider('dual-backend', {
+          backends: { webgpu: true, wasm: true },
+          verification: webGpuOnlyVerification,
+        }),
+      ],
+    )
+
+    expect(wasm.selection).toBeNull()
+    expect(wasm.rejected[0]?.reasons).toEqual([
+      {
+        code: 'verification-too-low',
+        detail: 'model is registered; request requires output',
+      },
+    ])
+
+    const webgpu = resolveCapabilityProvider(
+      {
+        capability: 'text-generation',
+        backends: ['webgpu'],
+        minimumVerification: 'output',
+      },
+      [
+        provider('dual-backend', {
+          backends: { webgpu: true, wasm: true },
+          verification: webGpuOnlyVerification,
+        }),
+      ],
+    )
+
+    expect(webgpu.selection?.backend).toBe('webgpu')
+    expect(webgpu.selection?.verification).toBe('output')
+  })
+
+  it('keeps manifest-wide verification for legacy evidence without environments', () => {
+    const resolution = resolveCapabilityProvider(
+      {
+        capability: 'text-generation',
+        backends: ['wasm'],
+        minimumVerification: 'output',
+      },
+      [provider('legacy', { verification: verification('output') })],
+    )
+
+    expect(resolution.selection?.backend).toBe('wasm')
+    expect(resolution.selection?.verification).toBe('output')
+  })
+
   it('honors explicit model preference before provider priority', () => {
     const resolution = resolveCapabilityProvider(
       {
@@ -117,6 +177,30 @@ describe('capability provider resolution', () => {
 
     expect(forward.selection?.provider.id).toBe('provider-a')
     expect(reverse.selection?.provider.id).toBe('provider-a')
+  })
+
+  it('uses locale-independent code-unit ordering for deterministic identifiers', () => {
+    const request = { capability: 'text-generation' as const }
+    const resolution = resolveCapabilityProvider(request, [
+      provider('provider-umlaut', { modelId: 'ä-model' }),
+      provider('provider-z', { modelId: 'z-model' }),
+    ])
+
+    // UTF-16 code-unit order is stable across hosts: "z" sorts before "ä".
+    expect(resolution.selection?.provider.id).toBe('provider-z')
+
+    const rejected = resolveCapabilityProvider(
+      { capability: 'text-to-speech' },
+      [
+        provider('ä-rejected'),
+        provider('z-rejected'),
+      ],
+    )
+
+    expect(rejected.rejected.map((candidate) => candidate.providerId)).toEqual([
+      'z-rejected',
+      'ä-rejected',
+    ])
   })
 
   it('can reject experimental-only backends', () => {
