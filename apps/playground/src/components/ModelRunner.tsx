@@ -75,6 +75,8 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     preflight,
     telemetry,
     error,
+    operation,
+    runtimePathProof,
     loading,
     loaded,
     downloadProgress,
@@ -176,7 +178,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const recentTelemetry = telemetry.slice(-4).reverse()
   const tartGuide = getTartGuideMessage({
     selectedModelName: selectedAdapter?.metadata.name ?? null,
-    loading,
+    operation,
     loaded: selectedLoaded,
     progressPercent: downloadProgress?.totalBytes ? progressPercent(downloadProgress) : null,
     error,
@@ -184,7 +186,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     resolvedBackend: selectedLoaded ? resolvedAccelerator : null,
     fallbackCount: selectedLoaded ? modelInfo?.fallbackCount ?? 0 : 0,
     preflightComplete: selectedLoaded && preflight !== null,
-    inferenceComplete: selectedLoaded && outputs !== null,
+    pathProofAvailable: selectedLoaded && runtimePathProof !== null,
   })
 
   return (
@@ -354,7 +356,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   disabled={loading}
                   className="rounded-full border border-outline px-4 py-2 text-xs font-medium text-on-surface transition-colors hover:bg-surface-container-high disabled:opacity-50"
                 >
-                  {loading ? 'Working…' : 'Run preflight'}
+                  {operation === 'preflight' ? 'Checking…' : 'Run preflight'}
                 </button>
               </div>
 
@@ -376,6 +378,30 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   <p className="font-medium text-on-surface">{preflight?.outputCount ?? '—'}</p>
                 </div>
               </div>
+
+              {runtimePathProof && (
+                <div className="mt-4 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-semibold text-on-surface">Session path proof captured</p>
+                      <p className="mt-0.5 text-[11px] text-on-surface-variant">
+                        requested {runtimePathProof.requestedBackend.toUpperCase()} → resolved {runtimePathProof.resolvedBackend.toUpperCase()}
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary">
+                      {runtimePathProof.inferenceEvents.length} inference {runtimePathProof.inferenceEvents.length === 1 ? 'event' : 'events'}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-on-surface-variant">
+                    <span>{runtimePathProof.outputCount} parsed {runtimePathProof.outputCount === 1 ? 'output' : 'outputs'}</span>
+                    <span>{runtimePathProof.fallbackCount} {runtimePathProof.fallbackCount === 1 ? 'fallback' : 'fallbacks'}</span>
+                    <span>durable evidence: {runtimePathProof.durableVerification?.status ?? 'registered'}</span>
+                  </div>
+                  <p className="mt-2 text-[11px] leading-relaxed text-on-surface-variant">
+                    This records what this browser actually ran. It does not promote the adapter&apos;s durable verification level.
+                  </p>
+                </div>
+              )}
 
               {recentTelemetry.length > 0 && (
                 <div className="mt-4 border-t border-outline/30 pt-3">
@@ -416,14 +442,14 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
               className="inline-flex items-center justify-center rounded-full bg-primary px-8 py-3 text-sm font-medium text-on-primary shadow-md transition-all duration-300 hover:scale-[1.02] hover:shadow-lg active:scale-[0.97] disabled:opacity-50 disabled:shadow-none"
               style={{ transitionTimingFunction: 'var(--ease-spring)' }}
             >
-              {loading ? 'Running...' : `Run Inference (${(resolvedAccelerator ?? accelerator).toUpperCase()})`}
+              {operation === 'inference' ? 'Running inference…' : `Run Inference (${(resolvedAccelerator ?? accelerator).toUpperCase()})`}
             </button>
 
             <OutputViewer outputs={outputs} outputTensors={outputTensors} outputSpecs={outputSpecs} />
           </div>
         )}
 
-        {selectedAdapter && downloadingId === selectedAdapter.modelId && loading && (
+        {selectedAdapter && downloadingId === selectedAdapter.modelId && operation === 'model-load' && (
           <div className="mt-3">
             <p className="text-on-surface-variant">Loading model...</p>
             {downloadProgress && (

@@ -10,6 +10,11 @@ import {
 import type { Tensor } from '@litertjs/core'
 import type { InferenceContext, ModelAdapter, TensorSpec } from '../adapters/types'
 import { createModelLibraryAssetResolver, registerModelAssets } from '../modelStorage'
+import {
+  createRuntimePathProof,
+  type RuntimeOperation,
+  type RuntimePathProof,
+} from '../runtimePathProof'
 
 export type Accelerator = BackendPreference
 
@@ -33,6 +38,8 @@ interface UseModelRunnerReturn {
   preflight: LiteRtPreflightResult | null
   telemetry: readonly LiteRtTelemetryRecord[]
   error: string | null
+  operation: RuntimeOperation
+  runtimePathProof: RuntimePathProof | null
   loading: boolean
   loaded: boolean
   downloadProgress: { loadedBytes: number; totalBytes?: number } | null
@@ -74,7 +81,8 @@ export function useModelRunner(): UseModelRunnerReturn {
   const [outputTensors, setOutputTensors] = useState<Record<string, RawTensor> | null>(null)
   const [outputSpecs, setOutputSpecs] = useState<TensorSpec[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [operation, setOperation] = useState<RuntimeOperation>('idle')
+  const [runtimePathProof, setRuntimePathProof] = useState<RuntimePathProof | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [accelerator, setAccelerator] = useState<Accelerator>('auto')
   const [resolvedAccelerator, setResolvedAccelerator] = useState<string | null>(null)
@@ -83,6 +91,7 @@ export function useModelRunner(): UseModelRunnerReturn {
   const [telemetry, setTelemetry] = useState<readonly LiteRtTelemetryRecord[]>([])
   const [downloadProgress, setDownloadProgress] = useState<{ loadedBytes: number; totalBytes?: number } | null>(null)
   const [modelBase, setModelBase] = useState(pageBase())
+  const loading = operation !== 'idle'
 
   const runtimePromiseRef = useRef<Promise<ManagedLiteRtRuntimeContext> | null>(null)
   const adapterRef = useRef<ModelAdapter | null>(null)
@@ -105,9 +114,11 @@ export function useModelRunner(): UseModelRunnerReturn {
 
   const refreshRuntimeState = useCallback((runtime: ManagedLiteRtRuntimeContext, adapter: ModelAdapter, target: Accelerator) => {
     const info = runtime.liteRt.getModelInfo(adapter.metadata.modelPath, { accelerator: target }) ?? null
+    const nextTelemetry = runtime.liteRt.getTelemetry()
     setModelInfo(info)
     setResolvedAccelerator(info?.resolvedBackend ?? runtime.backend)
-    setTelemetry(runtime.liteRt.getTelemetry())
+    setTelemetry(nextTelemetry)
+    return { info, telemetry: nextTelemetry }
   }, [])
 
   const loadModel = useCallback(async (adapter: ModelAdapter, acc?: Accelerator) => {
@@ -117,8 +128,9 @@ export function useModelRunner(): UseModelRunnerReturn {
     const controller = new AbortController()
     loadControllerRef.current = controller
 
-    setLoading(true)
+    setOperation('model-load')
     setError(null)
+    setRuntimePathProof(null)
     setLoaded(false)
     setPreflight(null)
     setOutputs(null)
@@ -159,7 +171,7 @@ export function useModelRunner(): UseModelRunnerReturn {
       setResolvedAccelerator(null)
       setError(errorMessage(cause))
     } finally {
-      if (requestId === requestIdRef.current) setLoading(false)
+      if (requestId === requestIdRef.current) setOperation('idle')
     }
   }, [accelerator, ensureRuntime, refreshRuntimeState])
 
@@ -171,7 +183,8 @@ export function useModelRunner(): UseModelRunnerReturn {
     const adapter = adapterRef.current
     adapterRef.current = null
 
-    setLoading(false)
+    setOperation('idle')
+    setRuntimePathProof(null)
     setLoaded(false)
     setModelInfo(null)
     setResolvedAccelerator(null)
@@ -202,10 +215,12 @@ export function useModelRunner(): UseModelRunnerReturn {
       return
     }
 
-    setLoading(true)
+    setOperation('inference')
+    setRuntimePathProof(null)
     setError(null)
     try {
       const runtime = await ensureRuntime()
+      const telemetryStart = runtime.liteRt.getTelemetry().length
       const webNNOptions = accelerator === 'webnn' || accelerator === 'auto'
         ? { devicePreference: 'npu' as const, powerPreference: 'high-performance' as const }
         : undefined
@@ -262,11 +277,19 @@ export function useModelRunner(): UseModelRunnerReturn {
       }
 
       setOutputs(parsed)
-      refreshRuntimeState(runtime, adapter, accelerator)
+      const runtimeState = refreshRuntimeState(runtime, adapter, accelerator)
+      setRuntimePathProof(createRuntimePathProof({
+        adapter,
+        requestedBackend: accelerator,
+        modelInfo: runtimeState.info,
+        telemetry: runtimeState.telemetry,
+        telemetryStart,
+        outputCount: Object.keys(parsed).length,
+      }))
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
-      setLoading(false)
+      setOperation('idle')
     }
   }, [accelerator, ensureRuntime, refreshRuntimeState])
 
@@ -277,7 +300,7 @@ export function useModelRunner(): UseModelRunnerReturn {
       return
     }
 
-    setLoading(true)
+    setOperation('preflight')
     setError(null)
     try {
       const runtime = await ensureRuntime()
@@ -292,7 +315,7 @@ export function useModelRunner(): UseModelRunnerReturn {
     } catch (cause) {
       setError(errorMessage(cause))
     } finally {
-      setLoading(false)
+      setOperation('idle')
     }
   }, [accelerator, ensureRuntime, refreshRuntimeState])
 
@@ -303,6 +326,8 @@ export function useModelRunner(): UseModelRunnerReturn {
       const runtime = runtimePromiseRef.current
       runtimePromiseRef.current = null
       adapterRef.current = null
+      setOperation('idle')
+      setRuntimePathProof(null)
       setLoaded(false)
       setModelInfo(null)
       setPreflight(null)
@@ -329,6 +354,8 @@ export function useModelRunner(): UseModelRunnerReturn {
     preflight,
     telemetry,
     error,
+    operation,
+    runtimePathProof,
     loading,
     loaded,
     downloadProgress,
