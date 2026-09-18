@@ -149,10 +149,6 @@ function familyFor(adapter: ModelAdapter): ModelFamily {
   return 'Other'
 }
 
-function groupFor(adapter: ModelAdapter, stored: boolean): ModelGroup {
-  return stored ? 'On this device' : familyFor(adapter)
-}
-
 function defaultGroup(grouped: Map<ModelGroup, ModelAdapter[]>): ModelGroup {
   if (grouped.get('Language')?.length) return 'Language'
   return GROUP_ORDER.find((group) => grouped.get(group)?.length) ?? 'Other'
@@ -177,10 +173,16 @@ export default function ModelList({
   const grouped = useMemo(() => {
     const next = new Map<ModelGroup, ModelAdapter[]>()
     for (const adapter of adapters) {
-      const group = groupFor(adapter, storedModels.has(adapter.modelId))
-      const values = next.get(group) ?? []
-      values.push(adapter)
-      next.set(group, values)
+      const family = familyFor(adapter)
+      const familyValues = next.get(family) ?? []
+      familyValues.push(adapter)
+      next.set(family, familyValues)
+
+      if (storedModels.has(adapter.modelId)) {
+        const storedValues = next.get('On this device') ?? []
+        storedValues.push(adapter)
+        next.set('On this device', storedValues)
+      }
     }
 
     for (const values of next.values()) {
@@ -194,8 +196,11 @@ export default function ModelList({
   useEffect(() => {
     if (searching || !selectedModelId) return
     const selected = adapters.find((adapter) => adapter.modelId === selectedModelId)
-    if (selected) setActiveGroup(groupFor(selected, storedModels.has(selected.modelId)))
-  }, [adapters, searching, selectedModelId, storedModels])
+    if (!selected) return
+
+    if (activeGroup === 'On this device' && storedModels.has(selected.modelId)) return
+    setActiveGroup(familyFor(selected))
+  }, [activeGroup, adapters, searching, selectedModelId, storedModels])
 
   useEffect(() => {
     if (!grouped.get(activeGroup)?.length) setActiveGroup(defaultGroup(grouped))
@@ -277,7 +282,6 @@ export default function ModelList({
                 ) : isUnavailable ? (
                   <span className="shrink-0 text-[9px] text-on-surface-muted">Unavailable</span>
                 ) : null}
-                <span className="shrink-0 text-[10px] text-on-surface-muted">{isSelected ? '▴' : '▾'}</span>
               </button>
 
               {isSelected && (
