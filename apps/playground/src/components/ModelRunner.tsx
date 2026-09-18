@@ -1,8 +1,14 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useModelRunner } from '../hooks/useModelRunner'
 import type { Accelerator } from '../hooks/useModelRunner'
 import type { ModelAdapter, TensorSpec } from '../adapters/types'
 import { getTartGuideMessage } from '../tartGuide'
+import {
+  clearStoredModels,
+  listStoredModels,
+  removeStoredModel,
+  type StoredModelInfo,
+} from '../modelStorage'
 import ModelList from './ModelList'
 import InputEditor from './InputEditor'
 import ImageInput from './ImageInput'
@@ -56,6 +62,7 @@ function metric(value: number | undefined): string {
 export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const {
     loadModel,
+    unloadModel,
     runInference,
     preflightModel,
     outputs,
@@ -78,6 +85,9 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const [inputValues, setInputValues] = useState<Record<string, unknown>>({})
   const [search, setSearch] = useState('')
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
+  const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
+  const [storedModels, setStoredModels] = useState<StoredModelInfo[]>([])
+  const [storageBusy, setStorageBusy] = useState(false)
   const [modelBaseInput, setModelBaseInput] = useState(modelBase)
 
   // ponytail: merge so image + text + scalar widgets can coexist on one adapter (e.g. CLIPSeg).
@@ -85,24 +95,67 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     setInputValues(prev => ({ ...prev, ...values }))
   }, [])
 
-  const handleSelect = async (adapter: ModelAdapter) => {
-    if (onSelect && adapter.isPipeline) {
-      onSelect(adapter.modelId)
-      return
-    }
-    setDownloadingId(adapter.modelId)
+  const refreshStoredModels = useCallback(async () => {
+    setStoredModels(await listStoredModels())
+  }, [])
+
+  useEffect(() => {
+    void refreshStoredModels()
+  }, [refreshStoredModels])
+
+  const handleSelect = (adapter: ModelAdapter) => {
     setSelectedAdapter(adapter)
     setInputValues({})
-    await loadModel(adapter)
-    setDownloadingId(null)
+  }
+
+  const handleLoadSelected = async () => {
+    if (!selectedAdapter || selectedAdapter.isPipeline || selectedAdapter.disabled) return
+    setDownloadingId(selectedAdapter.modelId)
+    setLoadedModelId(selectedAdapter.modelId)
+    try {
+      await loadModel(selectedAdapter)
+      await refreshStoredModels()
+    } finally {
+      setDownloadingId(null)
+    }
+  }
+
+  const handleUnload = async () => {
+    await unloadModel()
+    setLoadedModelId(null)
+  }
+
+  const handleRemoveStored = async (modelId: string) => {
+    setStorageBusy(true)
+    try {
+      if (loadedModelId === modelId) await handleUnload()
+      await removeStoredModel(modelId)
+      await refreshStoredModels()
+    } finally {
+      setStorageBusy(false)
+    }
+  }
+
+  const handleClearStored = async () => {
+    setStorageBusy(true)
+    try {
+      if (loadedModelId) await handleUnload()
+      await clearStoredModels()
+      await refreshStoredModels()
+    } finally {
+      setStorageBusy(false)
+    }
   }
 
   const handleAcceleratorChange = (next: Accelerator) => {
+    if (loadedModelId) void handleUnload()
     setAccelerator(next)
-    if (selectedAdapter) void loadModel(selectedAdapter, next)
   }
 
-  const commitModelBase = () => setModelBase(modelBaseInput)
+  const commitModelBase = () => {
+    if (loadedModelId) void handleUnload()
+    setModelBase(modelBaseInput)
+  }
 
   const filtered = search
     ? adapters.filter(a =>
@@ -112,18 +165,26 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
       )
     : adapters
 
+  const storedModelMap = useMemo(
+    () => new Map(storedModels.map((model) => [model.modelId, model])),
+    [storedModels],
+  )
+  const storedModelIds = useMemo(() => new Set(storedModelMap.keys()), [storedModelMap])
+  const selectedLoaded = !!selectedAdapter && !selectedAdapter.isPipeline && loaded && loadedModelId === selectedAdapter.modelId
+  const selectedStored = selectedAdapter ? storedModelMap.get(selectedAdapter.modelId) : undefined
+  const storedBytes = storedModels.reduce((total, model) => total + model.bytes, 0)
   const recentTelemetry = telemetry.slice(-4).reverse()
   const tartGuide = getTartGuideMessage({
     selectedModelName: selectedAdapter?.metadata.name ?? null,
     loading,
-    loaded,
+    loaded: selectedLoaded,
     progressPercent: downloadProgress?.totalBytes ? progressPercent(downloadProgress) : null,
     error,
     requestedBackend: accelerator,
-    resolvedBackend: resolvedAccelerator,
-    fallbackCount: modelInfo?.fallbackCount ?? 0,
-    preflightComplete: preflight !== null,
-    inferenceComplete: outputs !== null,
+    resolvedBackend: selectedLoaded ? resolvedAccelerator : null,
+    fallbackCount: selectedLoaded ? modelInfo?.fallbackCount ?? 0 : 0,
+    preflightComplete: selectedLoaded && preflight !== null,
+    inferenceComplete: selectedLoaded && outputs !== null,
   })
 
   return (
@@ -131,9 +192,9 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
       <div className="mx-auto p-6" style={{ maxWidth: 900 }}>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-on-surface">LiteRT Playground</h1>
+            <h1 className="text-3xl font-bold text-on-surface">Lil Tart</h1>
             <p className="mt-1 text-sm text-on-surface-variant">
-              Shared runtime qualification lab for browser and local inference packages.
+              Browse first. Download only what you choose, then prove the runtime path locally.
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -158,18 +219,40 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           className="mb-3 w-full rounded-lg border border-outline bg-surface-container px-4 py-2 text-sm text-on-surface transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
         />
 
-        <div className="mb-3">
-          <label className="mb-1 block text-xs font-medium text-on-surface-variant">Model server base URL</label>
-          <input
-            type="url"
-            placeholder="https://your-model-server.com/"
-            value={modelBaseInput}
-            onChange={e => setModelBaseInput(e.target.value)}
-            onBlur={commitModelBase}
-            onKeyDown={e => { if (e.key === 'Enter') commitModelBase() }}
-            className="w-full rounded-lg border border-outline bg-surface-container px-4 py-2 text-sm text-on-surface transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
-          />
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-outline/40 bg-surface-container-low p-3">
+          <div>
+            <p className="text-xs font-semibold text-on-surface">Model library</p>
+            <p className="mt-0.5 text-[11px] text-on-surface-variant">
+              {storedModels.length} stored · {formatBytes(storedBytes)}
+            </p>
+          </div>
+          {storedModels.length > 0 && (
+            <button
+              type="button"
+              onClick={() => void handleClearStored()}
+              disabled={storageBusy || loading}
+              className="rounded-full border border-outline px-3 py-1.5 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface disabled:opacity-50"
+            >
+              Clear all downloads
+            </button>
+          )}
         </div>
+
+        <details className="mb-4 rounded-xl border border-outline/40 bg-surface-container-low px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-on-surface-variant">Runtime settings</summary>
+          <div className="mt-3">
+            <label className="mb-1 block text-xs font-medium text-on-surface-variant">Model server base URL</label>
+            <input
+              type="url"
+              placeholder="https://your-model-server.com/"
+              value={modelBaseInput}
+              onChange={e => setModelBaseInput(e.target.value)}
+              onBlur={commitModelBase}
+              onKeyDown={e => { if (e.key === 'Enter') commitModelBase() }}
+              className="w-full rounded-lg border border-outline bg-surface-container px-4 py-2 text-sm text-on-surface transition-colors focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none"
+            />
+          </div>
+        </details>
 
         <ModelList
           adapters={filtered}
@@ -178,8 +261,69 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           loadingModelId={downloadingId}
           downloadProgress={downloadingId === selectedAdapter?.modelId ? downloadProgress : null}
           selectedModelId={selectedAdapter?.modelId ?? null}
-          isModelLoaded={loaded && selectedAdapter !== null}
+          loadedModelId={loaded && loadedModelId ? loadedModelId : null}
+          storedModelIds={storedModelIds}
         />
+
+        {selectedAdapter && (
+          <section className="mt-5 rounded-2xl border border-outline/50 bg-surface-container p-4">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div className="min-w-0 flex-1">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-on-surface-variant">
+                  Selected
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-on-surface">{selectedAdapter.metadata.name}</h2>
+                <p className="mt-1 text-sm text-on-surface-variant">{selectedAdapter.metadata.description}</p>
+                {selectedStored && (
+                  <p className="mt-2 text-xs text-on-surface-variant">
+                    Stored locally · {formatBytes(selectedStored.bytes)} across {selectedStored.assets} {selectedStored.assets === 1 ? 'asset' : 'assets'}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2">
+                {selectedAdapter.isPipeline ? (
+                  <button
+                    type="button"
+                    onClick={() => onSelect?.(selectedAdapter.modelId)}
+                    className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-on-primary"
+                  >
+                    Open pipeline
+                  </button>
+                ) : selectedLoaded ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleUnload()}
+                    disabled={loading}
+                    className="rounded-full border border-outline px-4 py-2 text-xs font-medium text-on-surface hover:bg-surface-container-high disabled:opacity-50"
+                  >
+                    Unload from memory
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleLoadSelected()}
+                    disabled={loading || !!selectedAdapter.disabled}
+                    className="rounded-full bg-primary px-4 py-2 text-xs font-semibold text-on-primary disabled:opacity-50"
+                  >
+                    {selectedStored ? 'Load from device' : 'Download & load'}
+                  </button>
+                )}
+
+                {selectedStored && !selectedAdapter.isPipeline && (
+                  <button
+                    type="button"
+                    onClick={() => void handleRemoveStored(selectedAdapter.modelId)}
+                    disabled={storageBusy || loading}
+                    className="rounded-full border border-error/50 px-4 py-2 text-xs font-medium text-error hover:bg-error-container/30 disabled:opacity-50"
+                  >
+                    Remove download
+                  </button>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {error && (
           <div className="mt-3 rounded-lg bg-error-container p-3 text-sm text-on-error-container">
@@ -187,7 +331,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           </div>
         )}
 
-        {selectedAdapter && loaded && (
+        {selectedAdapter && selectedLoaded && (
           <div className="mt-6 space-y-6">
             <section className="rounded-2xl border border-outline/40 bg-surface-container p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
@@ -279,7 +423,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           </div>
         )}
 
-        {selectedAdapter && !loaded && loading && (
+        {selectedAdapter && downloadingId === selectedAdapter.modelId && loading && (
           <div className="mt-3">
             <p className="text-on-surface-variant">Loading model...</p>
             {downloadProgress && (
@@ -303,7 +447,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
 
       <TartGuide
         guide={tartGuide}
-        onRunPreflight={selectedAdapter && loaded ? () => void preflightModel() : undefined}
+        onRunPreflight={selectedLoaded ? () => void preflightModel() : undefined}
       />
     </div>
   )
