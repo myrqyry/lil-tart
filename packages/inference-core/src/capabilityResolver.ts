@@ -26,9 +26,25 @@ interface RankedCandidate {
   priority: number
 }
 
-export function getCapabilityVerificationLevel(manifest: ModelManifest): CapabilityVerificationLevel {
+export function getCapabilityVerificationLevel(
+  manifest: ModelManifest,
+  backend?: Backend,
+): CapabilityVerificationLevel {
   const verification = manifest.verification
   if (!verification || verification.assets !== 'pass') return 'registered'
+
+  // When qualification environments are recorded, the evidence only applies to
+  // those backends. Manifests without environment metadata keep the legacy
+  // manifest-wide behavior.
+  if (
+    backend &&
+    verification.environments &&
+    verification.environments.length > 0 &&
+    !verification.environments.some((environment) => environment.backend === backend)
+  ) {
+    return 'registered'
+  }
+
   if (verification.compile !== 'pass') return 'assets'
   if (verification.inference !== 'pass') return 'compile'
   if (verification.output !== 'pass') return 'inference'
@@ -47,8 +63,8 @@ export function resolveCapabilityProvider(
 
   for (const provider of providers) {
     const reasons: CapabilityCandidateRejection['reasons'] = []
-    const verification = getCapabilityVerificationLevel(provider.manifest)
     const backend = findBackend(provider.manifest, backendOrder, allowExperimental)
+    const verification = getCapabilityVerificationLevel(provider.manifest, backend?.backend)
 
     if (!provider.manifest.capabilities.includes(request.capability)) {
       reasons.push({
@@ -115,7 +131,7 @@ export function resolveCapabilityProvider(
 
   candidates.sort(compareCandidates)
   rejected.sort((a, b) =>
-    a.providerId.localeCompare(b.providerId) || a.modelId.localeCompare(b.modelId),
+    compareIdentifiers(a.providerId, b.providerId) || compareIdentifiers(a.modelId, b.modelId),
   )
 
   return {
@@ -147,6 +163,11 @@ function preferredModelRank(modelId: string, preferredModelIds?: readonly string
   return rank === -1 ? Number.MAX_SAFE_INTEGER : rank
 }
 
+function compareIdentifiers(a: string, b: string): number {
+  if (a === b) return 0
+  return a < b ? -1 : 1
+}
+
 function compareCandidates(a: RankedCandidate, b: RankedCandidate): number {
   if (a.preferredModelRank !== b.preferredModelRank) {
     return a.preferredModelRank - b.preferredModelRank
@@ -156,7 +177,7 @@ function compareCandidates(a: RankedCandidate, b: RankedCandidate): number {
   if (a.priority !== b.priority) return b.priority - a.priority
 
   return (
-    a.selection.provider.manifest.modelId.localeCompare(b.selection.provider.manifest.modelId) ||
-    a.selection.provider.id.localeCompare(b.selection.provider.id)
+    compareIdentifiers(a.selection.provider.manifest.modelId, b.selection.provider.manifest.modelId) ||
+    compareIdentifiers(a.selection.provider.id, b.selection.provider.id)
   )
 }
