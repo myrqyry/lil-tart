@@ -196,3 +196,16 @@ body {
     grid-column: 1 / -1;
   }
 }
+
+
+.model-card__icon {
+  color: var(--model-type);
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in oklab, var(--model-type) 18%, var(--color-surface-container-high)),
+      color-mix(in oklab, var(--model-type) 8%, var(--color-surface-container))
+    );
+  border: 1px solid color-mix(in oklab, var(--model-type) 26%, var(--color-outline-variant));
+  box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+}
