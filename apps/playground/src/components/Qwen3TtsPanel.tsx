@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef } from 'react'
-import { Qwen3TtsPipeline, type QwenTtsConfig } from '@litert-playground/qwen3-tts'
-import { createHttpAssetResolver } from '@litert-playground/inference-core'
-import { createLiteRtRuntime } from '@litert-playground/runtime-litert'
+import { useEffect, useRef, useState } from 'react'
+import { Qwen3TtsPipeline, qwen3TtsManifest, type QwenTtsConfig } from '@litert-playground/qwen3-tts'
+import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
+import { createModelLibraryAssetResolver, registerModelAssets } from '../modelStorage'
 import type { PipelineProgress } from '@litert-playground/inference-core'
 
 let pipeline: Qwen3TtsPipeline | null = null
@@ -23,29 +23,61 @@ export function Qwen3TtsPanel() {
   })
 
   const updateCfg = (updater: (prev: QwenTtsConfig) => QwenTtsConfig) => setCfg(updater)
-  const loadRef = useRef(false)
+  const ctxRef = useRef<ManagedLiteRtRuntimeContext | null>(null)
+
+  const disposePipeline = async () => {
+    const current = pipeline
+    const ctx = ctxRef.current
+    pipeline = null
+    ctxRef.current = null
+    if (current) {
+      try { await current.dispose() } catch { /* best-effort cleanup */ }
+    }
+    ctx?.liteRt.dispose()
+  }
 
   useEffect(() => {
-    if (loadRef.current) return
-    loadRef.current = true
+    return () => {
+      void disposePipeline()
+    }
+  }, [])
 
-    if (pipeline?.status === 'ready') { setStatus('Ready'); return }
-    pipeline = null
-
+  const handleLoad = async () => {
+    if (status === 'Loading...' || status === 'Ready') return
     setStatus('Loading...')
     setError(null)
+    setProgress('Preparing runtime…')
 
-    const p = new Qwen3TtsPipeline()
-    p.onProgress = (pr: PipelineProgress) => {
-      setProgress(`${pr.phase} ${pr.step}/${pr.total}`)
+    try {
+      await disposePipeline()
+      registerModelAssets(qwen3TtsManifest.modelId, qwen3TtsManifest.assets.map((asset) => asset.path))
+
+      const p = new Qwen3TtsPipeline()
+      p.onProgress = (pr: PipelineProgress) => {
+        setProgress(`${pr.phase} ${pr.step}/${pr.total}`)
+      }
+
+      const ctx = await createLiteRtRuntime({
+        assetBase: '/models/qwen3-tts',
+        assets: createModelLibraryAssetResolver('/models/qwen3-tts/'),
+      })
+      ctxRef.current = ctx
+      await p.load(ctx)
+      pipeline = p
+      setStatus('Ready')
+      setProgress('')
+    } catch (e: unknown) {
+      await disposePipeline()
+      setStatus('Load failed')
+      setError(String(e))
     }
+  }
 
-    const assets = createHttpAssetResolver('/models/qwen3-tts/')
-    createLiteRtRuntime({ assetBase: '/models/qwen3-tts', assets })
-      .then(ctx => p.load(ctx))
-      .then(() => { pipeline = p; setStatus('Ready'); setError(null) })
-      .catch((e: unknown) => { setStatus('Load failed'); setError(String(e)) })
-  }, [])
+  const handleUnload = async () => {
+    await disposePipeline()
+    setStatus('Not loaded')
+    setProgress('')
+  }
 
   const handleGenerate = async () => {
     if (!pipeline || generating) return
@@ -65,12 +97,9 @@ export function Qwen3TtsPanel() {
   }
 
   const handleRetry = () => {
-    pipeline = null
-    loadRef.current = false
     setStatus('Not loaded')
     setError(null)
     setProgress('')
-    window.location.reload()
   }
 
   return (
@@ -102,6 +131,30 @@ export function Qwen3TtsPanel() {
             <option value="demo_speaker">Demo Speaker</option>
           </select>
         </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {status === 'Ready' ? (
+          <button
+            type="button"
+            onClick={() => void handleUnload()}
+            className="rounded-full border border-outline px-5 py-2 text-xs font-medium text-on-surface hover:bg-surface-container-high"
+          >
+            Unload pipeline
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void handleLoad()}
+            disabled={status === 'Loading...'}
+            className="rounded-full bg-primary px-5 py-2 text-xs font-semibold text-on-primary disabled:opacity-50"
+          >
+            {status === 'Loading...' ? 'Preparing…' : 'Prepare pipeline'}
+          </button>
+        )}
+        <p className="self-center text-[11px] text-on-surface-variant">
+          Model assets are only fetched when inference actually needs them.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3 rounded-xl bg-surface-container-low p-3 text-xs">

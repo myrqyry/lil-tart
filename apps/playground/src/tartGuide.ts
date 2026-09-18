@@ -1,10 +1,12 @@
+import type { RuntimeOperation } from './runtimePathProof'
+
 export type TartGuideTone = 'idle' | 'working' | 'success' | 'warning' | 'error'
 
 export type TartGuideAction = 'preflight'
 
 export interface TartGuideSnapshot {
   selectedModelName: string | null
-  loading: boolean
+  operation: RuntimeOperation
   loaded: boolean
   progressPercent: number | null
   error: string | null
@@ -12,7 +14,7 @@ export interface TartGuideSnapshot {
   resolvedBackend: string | null
   fallbackCount: number
   preflightComplete: boolean
-  inferenceComplete: boolean
+  pathProofAvailable: boolean
 }
 
 export interface TartGuideMessage {
@@ -42,7 +44,7 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
     }
   }
 
-  if (snapshot.loading) {
+  if (snapshot.operation === 'model-load') {
     const progress = snapshot.progressPercent === null
       ? ''
       : ` ${snapshot.progressPercent}%`
@@ -53,6 +55,24 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
         ? `Warming up ${snapshot.selectedModelName}`
         : 'Warming the oven',
       message: `Fetching and compiling the model${progress}. I’ll keep an eye on the runtime while it gets ready.`,
+    }
+  }
+
+  if (snapshot.operation === 'preflight') {
+    return {
+      tone: 'working',
+      kicker: 'Runtime check',
+      title: 'Running preflight.',
+      message: 'The model is already loaded. I’m checking compile + synthetic inference on the resolved runtime path now.',
+    }
+  }
+
+  if (snapshot.operation === 'inference') {
+    return {
+      tone: 'working',
+      kicker: 'Real inference',
+      title: 'Running your input.',
+      message: `The loaded model is executing on ${backendLabel(snapshot.resolvedBackend)}. If it completes, I’ll capture the emitted runtime events as session proof.`,
     }
   }
 
@@ -72,18 +92,20 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
       tone: 'warning',
       kicker: 'Runtime receipt',
       title: 'It works, but we took a fallback.',
-      message: `You asked for ${requested} and landed on ${resolved} with ${snapshot.fallbackCount} ${plural(snapshot.fallbackCount, 'fallback')}. It can still run, but this is worth checking before you ship it.`,
+      message: snapshot.pathProofAvailable
+        ? `You asked for ${requested} and landed on ${resolved} with ${snapshot.fallbackCount} ${plural(snapshot.fallbackCount, 'fallback')}. The run completed and that fallback is preserved in the session proof; a recipe must not hide it.`
+        : `You asked for ${requested} and landed on ${resolved} with ${snapshot.fallbackCount} ${plural(snapshot.fallbackCount, 'fallback')}. It can still run, but this is worth checking before you ship it.`,
       action: snapshot.preflightComplete ? undefined : 'preflight',
       actionLabel: snapshot.preflightComplete ? undefined : 'Run preflight',
     }
   }
 
-  if (snapshot.inferenceComplete) {
+  if (snapshot.pathProofAvailable) {
     return {
       tone: 'success',
       kicker: 'Inference complete',
       title: 'That’s a real working path. ✨',
-      message: `The model just ran locally on ${backendLabel(snapshot.resolvedBackend)}. This is the configuration we eventually want to turn into an “add this to my app” recipe.`,
+      message: `The model just ran locally on ${backendLabel(snapshot.resolvedBackend)}, and I captured the runtime events that prove this session path. That proof can now feed an “add this to my app” recipe without guessing from UI state.`,
     }
   }
 

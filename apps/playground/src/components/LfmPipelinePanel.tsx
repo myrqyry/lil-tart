@@ -1,7 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ModelManifest } from '@litert-playground/inference-core'
-import { createHttpAssetResolver } from '@litert-playground/inference-core'
 import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
+import {
+  createModelLibraryAssetResolver,
+  listStoredModels,
+  registerModelAssets,
+  removeStoredModel,
+  type StoredModelInfo,
+} from '../modelStorage'
 import {
   LiteRtLmTextPipeline,
   lfm2_5InstructManifest,
@@ -55,6 +61,8 @@ export function LfmPipelinePanel() {
   const [output, setOutput] = useState('')
   const [status, setStatus] = useState('Not loaded')
   const [error, setError] = useState<string | null>(null)
+  const [storedInfo, setStoredInfo] = useState<StoredModelInfo | null>(null)
+  const [storageBusy, setStorageBusy] = useState(false)
 
   const pipelineRef = useRef<AnyPipeline | null>(null)
   const ctxRef = useRef<ManagedLiteRtRuntimeContext | null>(null)
@@ -86,9 +94,10 @@ export function LfmPipelinePanel() {
       await disposePipeline()
       if (generation !== loadGenerationRef.current) return
 
+      registerModelAssets(m.manifest.modelId, m.manifest.assets.map((asset) => asset.path))
       ctx = await createLiteRtRuntime({
         assetBase: '/',
-        assets: createHttpAssetResolver('/'),
+        assets: createModelLibraryAssetResolver('/'),
         supportedBackends: { webgpu: true, wasm: true },
       })
       if (generation !== loadGenerationRef.current) {
@@ -113,6 +122,8 @@ export function LfmPipelinePanel() {
       pipelineRef.current = nextPipeline
       setStatus('Ready')
       setProgress('')
+      const stored = await listStoredModels()
+      setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
     } catch (e: unknown) {
       if (generation !== loadGenerationRef.current) return
       if (nextPipeline) {
@@ -125,15 +136,51 @@ export function LfmPipelinePanel() {
     }
   }
 
-  useEffect(() => {
-    const generation = ++loadGenerationRef.current
-    void load(modelId, generation)
+  const refreshStoredInfo = useCallback(async (id: string) => {
+    const m = MODELS.find((model) => model.id === id) ?? MODELS[0]
+    const stored = await listStoredModels()
+    setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
+  }, [])
 
+  useEffect(() => {
+    void refreshStoredInfo(modelId)
+  }, [modelId, refreshStoredInfo])
+
+  useEffect(() => {
     return () => {
       loadGenerationRef.current += 1
       void disposePipeline()
     }
-  }, [modelId])
+  }, [])
+
+  const handleModelChange = (id: string) => {
+    loadGenerationRef.current += 1
+    void disposePipeline()
+    setModelId(id)
+    setStatus('Not loaded')
+    setError(null)
+    setProgress('')
+    setOutput('')
+  }
+
+  const handleLoad = () => {
+    const generation = ++loadGenerationRef.current
+    void load(modelId, generation)
+  }
+
+  const handleRemoveStored = async () => {
+    setStorageBusy(true)
+    try {
+      loadGenerationRef.current += 1
+      await disposePipeline()
+      await removeStoredModel(entry.manifest.modelId)
+      setStatus('Not loaded')
+      setProgress('')
+      setStoredInfo(null)
+    } finally {
+      setStorageBusy(false)
+    }
+  }
 
   const handleRun = async () => {
     const p = pipelineRef.current
@@ -177,24 +224,60 @@ export function LfmPipelinePanel() {
   }
 
   const handleRetry = () => {
-    const generation = ++loadGenerationRef.current
     setStatus('Not loaded')
     setError(null)
     setProgress('')
-    void load(modelId, generation)
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="text-sm text-on-surface-variant">Status: {status}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div className="text-sm text-on-surface-variant">Status: {status}</div>
+          {storedInfo && (
+            <div className="mt-0.5 text-[11px] text-on-surface-variant">
+              Stored locally · {(storedInfo.bytes / 1e6).toFixed(1)} MB
+            </div>
+          )}
+        </div>
         <select
           className="rounded-lg border border-outline bg-surface-container px-2 py-1 text-xs text-on-surface"
           value={modelId}
-          onChange={e => setModelId(e.target.value)}
+          onChange={e => handleModelChange(e.target.value)}
         >
           {MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
         </select>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {status !== 'Ready' ? (
+          <button
+            type="button"
+            onClick={handleLoad}
+            disabled={status === 'Loading...' || storageBusy}
+            className="rounded-full bg-primary px-5 py-2 text-xs font-semibold text-on-primary disabled:opacity-50"
+          >
+            {status === 'Loading...' ? 'Loading…' : storedInfo ? 'Load from device' : 'Download & load'}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => { loadGenerationRef.current += 1; void disposePipeline(); setStatus('Not loaded') }}
+            className="rounded-full border border-outline px-5 py-2 text-xs font-medium text-on-surface hover:bg-surface-container-high"
+          >
+            Unload from memory
+          </button>
+        )}
+        {storedInfo && (
+          <button
+            type="button"
+            onClick={() => void handleRemoveStored()}
+            disabled={storageBusy || status === 'Loading...'}
+            className="rounded-full border border-error/50 px-5 py-2 text-xs font-medium text-error disabled:opacity-50"
+          >
+            Remove download
+          </button>
+        )}
       </div>
 
       <div className="grid grid-cols-2 gap-3 rounded-xl bg-surface-container-low p-3 text-xs">
