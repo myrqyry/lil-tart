@@ -257,18 +257,37 @@ function familyFor(adapter: ModelAdapter): ModelFamily {
   return 'Other'
 }
 
-function modelActionLabel(
-  adapter: ModelAdapter,
-  isLoaded: boolean,
-  stored: StoredModelSummary | undefined,
-  isLoading: boolean,
-): string {
-  if (isLoading) return 'Downloading…'
-  if (adapter.disabled) return 'Unavailable'
-  if (adapter.isPipeline) return 'Open'
-  if (isLoaded) return 'Unload'
-  if (stored) return 'Load'
-  return 'Download'
+
+function DownloadGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M12 4v10m-4-4 4 4 4-4M5 19h14" />
+    </svg>
+  )
+}
+
+function CheckGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="m5 12.5 4.2 4.2L19 7" />
+    </svg>
+  )
+}
+
+function OpenGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M7 17 17 7M9 7h8v8" />
+    </svg>
+  )
+}
+
+function SpinnerGlyph({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden>
+      <path d="M21 12a9 9 0 1 1-6.2-8.6" />
+    </svg>
+  )
 }
 
 export default function ModelList({
@@ -311,10 +330,20 @@ export default function ModelList({
         ? adapters.filter((adapter) => storedModels.has(adapter.modelId))
         : adapters.filter((adapter) => families.get(adapter.modelId) === activeFilter)
 
+    const sourceIndex = new Map(source.map((adapter, index) => [adapter.modelId, index]))
+    const priority = (adapter: ModelAdapter) => {
+      if (adapter.modelId === loadedModelId) return 0
+      if (storedModels.has(adapter.modelId)) return 1
+      if (adapter.isPipeline) return 2
+      if (!adapter.disabled) return 3
+      return 4
+    }
+
     return [...source].sort((a, b) =>
-      a.metadata.name < b.metadata.name ? -1 : a.metadata.name > b.metadata.name ? 1 : 0
+      priority(a) - priority(b) ||
+      (sourceIndex.get(a.modelId) ?? 0) - (sourceIndex.get(b.modelId) ?? 0)
     )
-  }, [activeFilter, adapters, families, searching, storedModels])
+  }, [activeFilter, adapters, families, loadedModelId, searching, storedModels])
 
   return (
     <div>
@@ -366,20 +395,23 @@ export default function ModelList({
           const isUnavailable = !!adapter.disabled
           const verificationStatus = adapter.verification?.status ?? 'registered'
           const verificationLabel = VERIFICATION_LABELS[verificationStatus]
-          const actionLabel = modelActionLabel(adapter, isLoaded, stored, isLoading)
-
-          const handleAction = () => {
+          const handleCornerAction = () => {
             if (isUnavailable || isLoading) return
             if (adapter.isPipeline) {
               onOpenPipeline?.(adapter.modelId)
               return
             }
-            if (isLoaded) {
-              onUnload(adapter)
-              return
-            }
+            if (stored) return
             onLoad(adapter)
           }
+
+          const cornerActionLabel = adapter.isPipeline
+            ? `Open ${adapter.metadata.name}`
+            : isLoading
+              ? `Downloading ${adapter.metadata.name}`
+              : stored
+                ? `${adapter.metadata.name} is downloaded`
+                : `Download ${adapter.metadata.name}`
 
           return (
             <article
@@ -388,27 +420,50 @@ export default function ModelList({
             >
               <div className="model-card__rail" />
 
+              <span
+                className="model-card__notch model-card__notch--type"
+                title={FILTER_LABELS[family]}
+                aria-label={FILTER_LABELS[family]}
+              >
+                <ModelGlyph adapter={adapter} family={family} className="h-3.5 w-3.5" />
+              </span>
+
+              <button
+                type="button"
+                onClick={handleCornerAction}
+                disabled={isUnavailable || isLoading || !!stored || (!!disabled && !adapter.isPipeline)}
+                aria-label={cornerActionLabel}
+                title={cornerActionLabel}
+                className="model-card__notch model-card__notch--action"
+              >
+                {isLoading ? (
+                  <SpinnerGlyph className="h-3.5 w-3.5 animate-spin" />
+                ) : adapter.isPipeline ? (
+                  <OpenGlyph className="h-3.5 w-3.5" />
+                ) : stored ? (
+                  <CheckGlyph className="h-3.5 w-3.5" />
+                ) : (
+                  <DownloadGlyph className="h-3.5 w-3.5" />
+                )}
+              </button>
+
               <button
                 type="button"
                 onClick={() => !isUnavailable && onSelect(adapter)}
                 disabled={isUnavailable && !isSelected}
-                className="flex w-full flex-1 items-start gap-2 px-2 pt-2 text-left disabled:opacity-55"
+                className="block w-full flex-1 px-2.5 pb-2 pt-7 text-left disabled:opacity-55"
               >
-                <span className="model-card__icon inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md">
-                  <ModelGlyph adapter={adapter} family={family} className="h-[17px] w-[17px]" />
-                </span>
-                <p className="min-w-0 break-words pt-0.5 text-[15px] font-semibold leading-[1.2] text-on-surface">
+                <p className="break-words text-[15px] font-semibold leading-[1.2] text-on-surface">
                   {adapter.metadata.name}
+                </p>
+                <p className="mt-1 text-[13px] leading-[1.28] text-on-surface-variant">
+                  {adapter.metadata.description}
                 </p>
               </button>
 
               {isSelected && (
-                <div className="px-2.5 pb-2 pt-1.5">
-                  <p className="max-w-2xl text-sm leading-snug text-on-surface-variant">
-                    {adapter.metadata.description}
-                  </p>
-
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1 text-xs">
+                <div className="px-2.5 pb-2">
+                  <div className="flex flex-wrap items-center gap-1 text-xs">
                     {adapter.metadata.tags.slice(0, 5).map((tag) => (
                       <span key={tag} className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-on-surface-variant">
                         {tag}
@@ -469,25 +524,21 @@ export default function ModelList({
                 </div>
               )}
 
-              <div className="mt-auto flex items-center justify-end px-2.5 pb-2 pt-1">
-                {isLoaded && (
-                  <span className="mr-auto text-xs font-medium text-tertiary">● Loaded</span>
-                )}
-                {stored && !isLoaded && (
-                  <span className="mr-auto text-xs font-medium text-secondary">● Stored</span>
-                )}
-                {isUnavailable && (
-                  <span className="mr-auto text-xs text-on-surface-muted">Unavailable</span>
-                )}
-                <button
-                  type="button"
-                  onClick={handleAction}
-                  disabled={isUnavailable || isLoading || (!!disabled && !isLoaded)}
-                  className="model-card__action shrink-0 rounded-md px-2.5 py-1 text-[13px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
-                >
-                  {actionLabel}
-                </button>
-              </div>
+              {isSelected && !adapter.isPipeline && stored && (
+                <div className="flex items-center gap-2 px-2.5 pb-2 text-xs">
+                  <span className={isLoaded ? 'text-tertiary' : 'text-secondary'}>
+                    {isLoaded ? 'Loaded in memory' : 'Downloaded'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => isLoaded ? onUnload(adapter) : onLoad(adapter)}
+                    disabled={disabled}
+                    className="ml-auto rounded-md border border-outline-variant px-2 py-1 text-xs font-medium text-on-surface hover:bg-surface-container-high disabled:opacity-45"
+                  >
+                    {isLoaded ? 'Unload' : 'Load'}
+                  </button>
+                </div>
+              )}
 
               {isSelected && stored && !adapter.isPipeline && (
                 <button
