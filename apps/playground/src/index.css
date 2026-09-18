@@ -19,6 +19,13 @@
   --color-tertiary-container: oklch(0.29 0.05 154);
   --color-on-tertiary-container: oklch(0.88 0.04 154);
 
+  /* Model families: type is encoded with color, status is encoded separately. */
+  --color-type-pipeline: oklch(0.76 0.105 205);
+  --color-type-language: oklch(0.73 0.135 285);
+  --color-type-audio: oklch(0.78 0.12 72);
+  --color-type-vision: oklch(0.74 0.115 154);
+  --color-type-other: oklch(0.7 0.075 245);
+
   /*
    * Surfaces deliberately span a wider lightness range. The previous ladder
    * was so compressed that cards, page background, hover and elevation all
