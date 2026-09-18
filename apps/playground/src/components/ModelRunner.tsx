@@ -192,7 +192,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
 
   return (
     <div className="min-h-screen bg-surface-dim">
-      <div className="mx-auto px-4 py-4 md:px-6" style={{ maxWidth: 1280 }}>
+      <div className="mx-auto w-full px-4 py-4 md:px-6 xl:px-8" style={{ maxWidth: 1640 }}>
         <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-bold text-on-surface">Lil Tart</h1>
