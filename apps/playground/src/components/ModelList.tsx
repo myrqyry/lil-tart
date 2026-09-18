@@ -39,14 +39,6 @@ const FILTER_LABELS: Record<ModelFilter, string> = {
   Other: 'Other',
 }
 
-const FAMILY_LABELS: Record<ModelFamily, string> = {
-  Pipelines: 'Pipeline',
-  Language: 'Language',
-  'Speech & audio': 'Audio',
-  'Vision & image': 'Vision',
-  Other: 'Other',
-}
-
 const FAMILY_CLASS: Record<ModelFamily, string> = {
   Pipelines: 'model-card--pipeline',
   Language: 'model-card--language',
@@ -112,17 +104,6 @@ function familyFor(adapter: ModelAdapter): ModelFamily {
   ) return 'Language'
 
   return 'Other'
-}
-
-function primaryTag(adapter: ModelAdapter, family: ModelFamily): string | null {
-  const familyWords = new Set([
-    'audio', 'speech', 'tts', 'asr', 'music', 'codec', 'voice',
-    'vision', 'image', 'ocr', 'segmentation', 'detection', 'depth', 'pose',
-    'llm', 'text', 'retrieval', 'encoder', 'embedding', 'classification',
-  ])
-  return adapter.metadata.tags.find((tag) => !familyWords.has(tag.toLowerCase())) ??
-    adapter.metadata.tags[0] ??
-    FAMILY_LABELS[family]
 }
 
 function modelActionLabel(
@@ -257,23 +238,11 @@ export default function ModelList({
                 type="button"
                 onClick={() => !isUnavailable && onSelect(adapter)}
                 disabled={isUnavailable && !isSelected}
-                className="block w-full px-3 pt-3 text-left disabled:opacity-55"
+                className="block w-full flex-1 px-3 pt-3 text-left disabled:opacity-55"
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="line-clamp-2 text-sm font-semibold leading-snug text-on-surface">
-                      {adapter.metadata.name}
-                    </p>
-                    {!isSelected && (
-                      <p className="mt-1 truncate text-[11px] text-on-surface-muted">
-                        {primaryTag(adapter, family)}
-                      </p>
-                    )}
-                  </div>
-                  <span className="model-card__type shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide">
-                    {FAMILY_LABELS[family]}
-                  </span>
-                </div>
+                <p className="break-words text-sm font-semibold leading-snug text-on-surface">
+                  {adapter.metadata.name}
+                </p>
               </button>
 
               {isSelected && (
@@ -294,6 +263,9 @@ export default function ModelList({
                   </div>
 
                   <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[10px]">
+                    <span className="model-card__type rounded-md px-1.5 py-0.5 font-semibold">
+                      {FILTER_LABELS[family]}
+                    </span>
                     {adapter.metadata.tags.map((tag) => (
                       <span key={tag} className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-on-surface-variant">
                         {tag}
@@ -334,26 +306,17 @@ export default function ModelList({
                 </div>
               )}
 
-              <div className="mt-auto flex items-center justify-between gap-2 border-t border-outline-variant/55 px-3 py-2">
-                <div className="min-w-0 text-[10px]">
-                  {isLoaded ? (
-                    <span className="font-medium text-tertiary">● Loaded</span>
-                  ) : stored ? (
-                    <span className="font-medium text-secondary">● Stored</span>
-                  ) : isUnavailable ? (
-                    <span className="text-on-surface-muted">Not located</span>
-                  ) : verificationLabel ? (
-                    <span className="text-on-surface-muted">{verificationLabel}</span>
-                  ) : (
-                    <span className="text-on-surface-muted">Ready to download</span>
-                  )}
-                </div>
-
+              <div className="mt-auto flex items-center justify-end border-t border-outline-variant/45 px-2.5 py-1.5">
+                {isLoading && (
+                  <span className="mr-auto text-[10px] font-medium text-primary">
+                    Downloading…
+                  </span>
+                )}
                 <button
                   type="button"
                   onClick={handleAction}
                   disabled={isUnavailable || isLoading || (!!disabled && !isLoaded)}
-                  className="model-card__action shrink-0 rounded-md px-2.5 py-1.5 text-[11px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
+                  className="model-card__action shrink-0 rounded-md px-2.5 py-1 text-[10px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   {actionLabel}
                 </button>
