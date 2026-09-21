@@ -105,20 +105,39 @@ explicit action.
 flowchart TD
     core["@litert-playground/inference-core\ncontracts · assets · receipts · validation"]
     runtime["@litert-playground/runtime-litert\nLiteRT lifecycle · backends · preflight · telemetry"]
-    kokoro["@litert-playground/kokoro"]
-    qwen["@litert-playground/qwen3-tts"]
+    cache["@litert-playground/browser-cache\nOPFS-backed asset caching"]
+    text["@litert-playground/text-gen\nLiteRT-LM / Transformers text generation"]
+    encoder["@litert-playground/encoder\ntext embeddings · classification"]
+    retrieval["@litert-playground/retrieval\nColBERT · reranking"]
+    kokoro["@litert-playground/kokoro\nverified browser TTS"]
+    qwen["@litert-playground/qwen3-tts\nphased LiteRT TTS"]
     playground["Lil Tart\napps/playground"]
     consumers["external consumers\nPodQast · Live Streamer · future apps"]
 
     core --> runtime
+    core --> cache
+    core --> text
+    core --> encoder
+    core --> retrieval
     core --> kokoro
     core --> qwen
     runtime --> qwen
+
     runtime --> playground
+    cache --> playground
+    text --> playground
+    encoder --> playground
+    retrieval --> playground
     kokoro --> playground
     qwen --> playground
-    runtime -. reusable runtime .-> consumers
-    kokoro -. reusable pipeline .-> consumers
+
+    runtime -. shared inference .-> consumers
+    cache -. shared inference .-> consumers
+    text -. shared inference .-> consumers
+    encoder -. shared inference .-> consumers
+    retrieval -. shared inference .-> consumers
+    kokoro -. shared inference .-> consumers
+    qwen -. shared inference .-> consumers
 ```
 
 The dependency direction is intentionally generic → specific. Product concepts
@@ -316,20 +335,30 @@ A useful extraction rule is:
 
 ## External consumption
 
-Consuming applications must pin all LiteRT Playground packages to one Git SHA.
-See [Package revision policy](docs/package-revision-policy.md) for the rules
-and the supported compatibility surface.
+Consuming applications should pin every shared inference package to one **Lil
+Tart** Git SHA. The canonical repository is `myrqyry/lil-tart`; the package
+namespace intentionally remains `@litert-playground/*` so the repository rename
+does not create a gratuitous package-API migration.
 
-`@litert-playground/kokoro` already uses an external-consumer-friendly contract
-with `@litert-playground/inference-core` as a peer dependency.
+See [Package revision policy](docs/package-revision-policy.md) for the exact
+pinning rules and the supported compatibility surface.
 
-`@litert-playground/runtime-litert` is currently still marked private and uses a
-workspace dependency on `inference-core`. Its runtime API is intended for reuse,
-but package distribution/versioning is deliberately a separate follow-up before
-other repositories pin it directly.
+The downstream local-inference stack is now exercised as an actual packed
+external consumer, not merely as workspace imports. The compatibility gate
+covers:
 
-That keeps runtime architecture changes and package-release policy from becoming
-one giant migration-shaped problem.
+- runtime contracts + LiteRT lifecycle: `inference-core`, `runtime-litert`
+- browser asset persistence: `browser-cache`
+- local language generation: `text-gen`
+- embeddings and RAG primitives: `encoder`, `retrieval`
+- speech generation: `kokoro`, `qwen3-tts`
+- reusable image/video inference packages
+
+Packages remain `private: true` because they are not registry releases. They are
+still intentionally consumable through SHA-pinned Git `path:` dependencies;
+`pnpm test:compatibility` packs, installs, type-checks, and builds that external
+surface. Product-specific worker orchestration, playback, UI state, and
+persistence stay in the consuming application.
 
 ## Project direction
 

@@ -9,14 +9,17 @@ const root = resolve(new URL('..', import.meta.url).pathname)
 const packages = [
   ['inference-core', 'inference-core.tgz'],
   ['runtime-litert', 'runtime-litert.tgz'],
+  ['browser-cache', 'browser-cache.tgz'],
   ['text-gen', 'text-gen.tgz'],
+  ['encoder', 'encoder.tgz'],
+  ['retrieval', 'retrieval.tgz'],
   ['kokoro', 'kokoro.tgz'],
   ['qwen3-tts', 'qwen3-tts.tgz'],
   ['image-embedding', 'image-embedding.tgz'],
   ['video-classification', 'video-classification.tgz'],
 ]
 
-const tempRoot = await mkdtemp(join(tmpdir(), 'litert-playground-compat-'))
+const tempRoot = await mkdtemp(join(tmpdir(), 'lil-tart-compat-'))
 
 try {
   const packRoot = join(tempRoot, 'packs')

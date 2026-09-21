@@ -391,10 +391,10 @@ importers:
       '@huggingface/transformers':
         specifier: ^3.8.1
         version: 3.8.1
+    devDependencies:
       '@litert-playground/inference-core':
         specifier: workspace:*
         version: link:../inference-core
-    devDependencies:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
@@ -470,10 +470,10 @@ importers:
       '@huggingface/transformers':
         specifier: ^3.8.1
         version: 3.8.1
+    devDependencies:
       '@litert-playground/inference-core':
         specifier: workspace:*
         version: link:../inference-core
-    devDependencies:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

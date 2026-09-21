@@ -1,5 +1,5 @@
 {
-  "name": "litert-playground-external-consumer-fixture",
+  "name": "lil-tart-external-consumer-fixture",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,10 @@
   "dependencies": {
     "@litert-playground/inference-core": "file:./archives/inference-core.tgz",
     "@litert-playground/runtime-litert": "file:./archives/runtime-litert.tgz",
+    "@litert-playground/browser-cache": "file:./archives/browser-cache.tgz",
     "@litert-playground/text-gen": "file:./archives/text-gen.tgz",
+    "@litert-playground/encoder": "file:./archives/encoder.tgz",
+    "@litert-playground/retrieval": "file:./archives/retrieval.tgz",
     "@litert-playground/kokoro": "file:./archives/kokoro.tgz",
     "@litert-playground/qwen3-tts": "file:./archives/qwen3-tts.tgz",
     "@litert-playground/image-embedding": "file:./archives/image-embedding.tgz",

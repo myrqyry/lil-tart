@@ -1,4 +1,4 @@
-# litert-playground
+# Lil Tart
 
 pnpm monorepo for LiteRT.js browser inference. Node 22+, pnpm 11+.
 
@@ -41,8 +41,13 @@ Product concepts (episodes, OBS, UI) belong in consuming apps, not shared packag
 
 ## Conventions
 
+- Shared packages keep the existing `@litert-playground/*` namespace even though
+  the repository is now `myrqyry/lil-tart`; do not rename package imports as a
+  side effect of repository branding.
 - All packages: `private: true`, `type: module`, `exports: ".": "./src/index.ts"`.
   Packages ship as TypeScript source; there is no per-package build step.
+- Any package intended for downstream apps must pass `pnpm test:compatibility`.
+  Workspace-only dependencies must not leak as `workspace:*` in packed metadata.
 - Tests co-located in `src/*.test.ts` (vitest).
 - Qualification tests live in `tests/runtime-qualification/` with their own vitest config (`environment: 'node'`).
 - Boundary tests in `tests/` enforce architecture invariants — keep them green.
