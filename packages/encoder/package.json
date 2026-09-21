@@ -12,11 +12,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.8.1",
-    "@litert-playground/inference-core": "workspace:*"
+    "@huggingface/transformers": "^3.8.1"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@litert-playground/inference-core": "workspace:*"
+  },
+  "peerDependencies": {
+    "@litert-playground/inference-core": "0.1.x"
   }
 }
