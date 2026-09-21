@@ -84,6 +84,35 @@ describe('workspace package boundaries', () => {
     expect(entrypoint).toContain('LiteRtLmTextConfig')
   })
 
+
+  it('keeps encoder and retrieval externally consumable through the shared core contract', async () => {
+    for (const packageName of ['encoder', 'retrieval']) {
+      const manifest = JSON.parse(await text(`packages/${packageName}/package.json`)) as {
+        dependencies?: Record<string, string>
+        peerDependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+      }
+
+      expect(manifest.dependencies).toMatchObject({
+        '@huggingface/transformers': '^3.8.1',
+      })
+      expect(manifest.dependencies?.['@litert-playground/inference-core']).toBeUndefined()
+      expect(manifest.peerDependencies).toMatchObject({
+        '@litert-playground/inference-core': '0.1.x',
+      })
+      expect(manifest.devDependencies).toMatchObject({
+        '@litert-playground/inference-core': 'workspace:*',
+      })
+    }
+
+    const encoderEntrypoint = await text('packages/encoder/src/index.ts')
+    const retrievalEntrypoint = await text('packages/retrieval/src/index.ts')
+    expect(encoderEntrypoint).toContain('EncoderPipeline')
+    expect(encoderEntrypoint).toContain('selectEncoderManifest')
+    expect(retrievalEntrypoint).toContain('ColBertPipeline')
+    expect(retrievalEntrypoint).toContain('rankColBert')
+  })
+
   it('keeps runtime and Qwen packages externally consumable through peer contracts', async () => {
     const runtime = JSON.parse(await text('packages/runtime-litert/package.json')) as {
       dependencies?: Record<string, string>
@@ -167,11 +196,24 @@ describe('workspace package boundaries', () => {
     expect(entrypoint).toContain('ClipImageConfig')
   })
 
-  it('keeps the packed consumer fixture on public package entrypoints', async () => {
+  it('keeps the packed consumer fixture on the full public inference surface', async () => {
     const consumer = await text('tests/fixtures/external-consumer/src/index.ts')
 
-    expect(consumer).toContain("from '@litert-playground/inference-core'")
-    expect(consumer).toContain("from '@litert-playground/runtime-litert'")
+    for (const packageName of [
+      'inference-core',
+      'runtime-litert',
+      'browser-cache',
+      'text-gen',
+      'encoder',
+      'retrieval',
+      'kokoro',
+      'qwen3-tts',
+      'image-embedding',
+      'video-classification',
+    ]) {
+      expect(consumer).toContain(`from '@litert-playground/${packageName}'`)
+    }
+
     expect(consumer).not.toMatch(/packages\/.*\/src/)
     expect(consumer).not.toMatch(/apps\/playground/)
   })
