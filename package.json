@@ -1,8 +1,8 @@
 {
-  "name": "litert-playground",
+  "name": "lil-tart",
   "version": "1.0.0",
   "private": true,
-  "description": "",
+  "description": "Local-first model launcher, runtime qualification lab, and reusable browser inference workspace",
   "main": "index.js",
   "scripts": {
     "dev": "pnpm --filter playground dev",
