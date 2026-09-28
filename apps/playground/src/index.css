@@ -113,7 +113,6 @@ body {
 }
 
 .model-card--selected {
-  min-height: 0;
   border-color: color-mix(in oklab, var(--model-type) 76%, white 6%);
   background:
     linear-gradient(
@@ -122,7 +121,7 @@ body {
       var(--color-surface-container) 68%
     );
   box-shadow:
-    0 12px 34px oklch(0.03 0.01 330 / 0.34),
+    0 8px 24px oklch(0.03 0.01 330 / 0.28),
     inset 0 1px 0 color-mix(in oklab, var(--model-type) 18%, transparent);
 }
 
@@ -172,22 +171,29 @@ body {
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
   gap: 0.5rem;
   align-items: stretch;
 }
 
-.model-card--selected {
-  grid-column: span 2;
+.model-card__title,
+.model-card__description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+}
+
+.model-card__title {
+  -webkit-line-clamp: 2;
+}
+
+.model-card__description {
+  -webkit-line-clamp: 2;
 }
 
 @media (max-width: 560px) {
   .model-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .model-card--selected {
-    grid-column: 1 / -1;
   }
 }
 
