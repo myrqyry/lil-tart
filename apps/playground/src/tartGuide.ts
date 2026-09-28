@@ -11,6 +11,7 @@ export interface TartGuideSnapshot {
   progressPercent: number | null
   error: string | null
   requestedBackend: string | null
+  executionBackend: string | null
   resolvedBackend: string | null
   fallbackCount: number
   preflightComplete: boolean
@@ -82,6 +83,26 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
       kicker: 'Lil Tart guide',
       title: 'Pick what you want to run.',
       message: 'Choose a model and I’ll follow the real runtime state: download, backend resolution, preflight, inference, and anything that goes sideways.',
+    }
+  }
+
+  if (
+    snapshot.loaded
+    && snapshot.requestedBackend
+    && snapshot.requestedBackend !== 'auto'
+    && snapshot.executionBackend
+    && snapshot.executionBackend !== snapshot.requestedBackend
+  ) {
+    const selected = backendLabel(snapshot.requestedBackend)
+    const execution = backendLabel(snapshot.executionBackend)
+    const resolved = backendLabel(snapshot.resolvedBackend)
+    return {
+      tone: 'warning',
+      kicker: 'Correctness override',
+      title: `This model is pinned to ${execution}.`,
+      message: `You selected ${selected}, but this model's verified browser contract requires ${execution}. Lil Tart requested ${execution} directly and resolved to ${resolved}; this is an explicit correctness override, not a runtime fallback.`,
+      action: snapshot.preflightComplete ? undefined : 'preflight',
+      actionLabel: snapshot.preflightComplete ? undefined : 'Run preflight',
     }
   }
 
