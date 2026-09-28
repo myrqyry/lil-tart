@@ -28,6 +28,7 @@ export const nafnetAdapter: ModelAdapter = {
     modelPath: 'https://huggingface.co/litert-community/NAFNet-SIDD-width32-LiteRT/resolve/main/nafnet_sidd_width32_fp16.tflite',
     tags: ['vision', 'denoising'],
   },
+  requiredBackend: 'wasm', // LiteRT.js 2.5.3 WebGPU sweep runs but does not match WASM output.
   inputSpecs: INPUT_SPECS,
   outputSpecs: OUTPUT_SPECS,
 
