@@ -5,6 +5,8 @@ export type RuntimeOperation = 'idle' | 'model-load' | 'preflight' | 'inference'
 
 export interface RuntimePathInferenceEvent {
   modelPath: string
+  selectedBackend: string
+  requestedBackend: string
   resolvedBackend: string
   inferenceDurationMs: number
   outputCount?: number
@@ -28,7 +30,7 @@ export interface RuntimePathProof {
 
 interface CreateRuntimePathProofOptions {
   adapter: Pick<ModelAdapter, 'modelId' | 'metadata' | 'verification'>
-  requestedBackend: string
+  selectedBackend: string
   modelInfo: LiteRtModelInfo | null
   telemetry: readonly LiteRtTelemetryRecord[]
   telemetryStart: number
@@ -57,6 +59,7 @@ export function createRuntimePathProof(options: CreateRuntimePathProofOptions): 
     .filter((entry) => entry.event === 'inference' && entry.inferenceDurationMs !== undefined)
     .map((entry): RuntimePathInferenceEvent => ({
       modelPath: entry.modelPath,
+      requestedBackend: entry.requestedBackend,
       resolvedBackend: entry.resolvedBackend,
       inferenceDurationMs: entry.inferenceDurationMs!,
       outputCount: entry.outputCount,
@@ -75,7 +78,8 @@ export function createRuntimePathProof(options: CreateRuntimePathProofOptions): 
     modelId: options.adapter.modelId,
     modelName: options.adapter.metadata.name,
     modelPath: options.adapter.metadata.modelPath,
-    requestedBackend: options.requestedBackend,
+    selectedBackend: options.selectedBackend,
+    requestedBackend: options.modelInfo?.requestedBackend ?? receiptEvent.requestedBackend,
     resolvedBackend: options.modelInfo?.resolvedBackend ?? receiptEvent.resolvedBackend,
     compileDurationMs: options.modelInfo?.compileDurationMs ?? 0,
     fallbackCount: options.modelInfo?.fallbackCount ?? receiptEvent.fallbackCount,
