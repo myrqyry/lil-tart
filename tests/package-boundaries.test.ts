@@ -113,6 +113,26 @@ describe('workspace package boundaries', () => {
     expect(retrievalEntrypoint).toContain('rankColBert')
   })
 
+  it('keeps the retrieval scoring subpath a verified public entrypoint', async () => {
+    const manifest = JSON.parse(await text('packages/retrieval/package.json')) as {
+      exports?: Record<string, string>
+    }
+
+    expect(manifest.exports).toMatchObject({
+      '.': './src/index.ts',
+      './scoring': './src/scoring.ts',
+    })
+
+    const scoringEntrypoint = await text('packages/retrieval/src/scoring.ts')
+    expect(scoringEntrypoint).toContain('rankColBert')
+    expect(scoringEntrypoint).toContain('rankDense')
+    expect(scoringEntrypoint).not.toMatch(/from '\.\/colbert'/)
+    expect(scoringEntrypoint).not.toContain('@huggingface/transformers')
+
+    const externalConsumer = await text('tests/fixtures/external-consumer/src/index.ts')
+    expect(externalConsumer).toContain("from '@litert-playground/retrieval/scoring'")
+  })
+
   it('keeps runtime and Qwen packages externally consumable through peer contracts', async () => {
     const runtime = JSON.parse(await text('packages/runtime-litert/package.json')) as {
       dependencies?: Record<string, string>

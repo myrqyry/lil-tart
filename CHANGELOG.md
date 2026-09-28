@@ -13,10 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `feat`: add model-server base URL input to `ModelRunner` (`apps/playground/src/hooks/useModelRunner.ts`, `ModelRunner.tsx`)
 - `feat`: show model task-type chips in list and detail view (`ModelList.tsx`)
 - `feat`: add download progress tracking for model loading
+- `feat(retrieval)`: publish a `./scoring` subpath export so consumers can import late-interaction scoring without loading the ColBERT pipeline entrypoint
 - `fix(playground)`: replace 12 empty adapters (`sam2` ×2, `vision` ×10 including `6drepnet`, `blaze-face`, `yolox`, `u2net`, `edsr`, `migan`, `style-*`) with working `prepareInputs`/`parseOutputs` (`apps/playground/src/adapters/sam2.ts:16`, `apps/playground/src/adapters/vision.ts:70`)
 
 ### Fixed
 - `encoder` and `retrieval` now keep `inference-core` as a peer contract instead of leaking `workspace:*` into downstream package metadata.
+- `fix(playground)`: resolve LFM pipeline model assets from Hugging Face instead of the app origin, so packaged consumers load the same weights as the app
+- `fix(text-gen)`: resolve the LiteRT-LM model through the runtime's asset resolver instead of handing the repo-relative manifest path to the engine, which resolved it against the app origin and 404'd
+- `fix(playground)`: the LFM panel's LiteRT WASM runtime now loads from the pinned `@litertjs/core` jsDelivr CDN; `apps/playground/public/` ships no `wasm/` directory, so origin-relative resolution could not work
+- `fix(playground)`: report stored model bytes for the resolver base actually in use, and reclaim entries orphaned by a base change, so "stored locally" no longer claims weights that would be re-downloaded
+- `fix(retrieval)`: remove unused retrieval state that broke stricter downstream TypeScript consumers
 - `fix`: cache LiteRT runtime in `ensureRuntime` and persist Ready badge (`packages/runtime-litert/src/context.ts:90`, `packages/runtime-litert/src/types.ts:96`)
 - `fix`: make MoViNet frame commit transactional and correct WASM probes
 - `fix`: terminate TTS workers on failure and probe WASM features honestly

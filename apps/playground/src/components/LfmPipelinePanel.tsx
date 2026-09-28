@@ -4,6 +4,7 @@ import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-p
 import {
   createModelLibraryAssetResolver,
   listStoredModels,
+  pruneSupersededModelCaches,
   registerModelAssets,
   removeStoredModel,
   type StoredModelInfo,
@@ -50,6 +51,10 @@ const CANDIDATES = [
   { id: 'doc-c', text: 'A quick castle develops the king and activates the rook.' },
 ]
 
+// Manifest asset paths are repo-relative, so the resolver base decides where weights
+// come from. This also decides the cache keys, so changing it orphans stored models.
+const MODEL_BASE = 'https://huggingface.co/'
+
 type AnyPipeline = LiteRtLmTextPipeline | ColBertPipeline | EncoderPipeline
 
 export function LfmPipelinePanel() {
@@ -95,8 +100,11 @@ export function LfmPipelinePanel() {
       if (generation !== loadGenerationRef.current) return
 
       registerModelAssets(m.manifest.modelId, m.manifest.assets.map((asset) => asset.path))
+      // No assetBase: the playground ships no public/wasm/ directory, so origin-relative
+      // resolution 404s. Omitting it selects the runtime's pinned @litertjs/core CDN
+      // fallback, which means the LiteRT WASM runtime is fetched from jsDelivr.
       ctx = await createLiteRtRuntime({
-        assets: createModelLibraryAssetResolver('https://huggingface.co/'),
+        assets: createModelLibraryAssetResolver(MODEL_BASE),
         supportedBackends: { webgpu: true, wasm: true },
       })
       if (generation !== loadGenerationRef.current) {
@@ -121,7 +129,8 @@ export function LfmPipelinePanel() {
       pipelineRef.current = nextPipeline
       setStatus('Ready')
       setProgress('')
-      const stored = await listStoredModels()
+      await pruneSupersededModelCaches(m.manifest.modelId, MODEL_BASE)
+      const stored = await listStoredModels(MODEL_BASE)
       setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
     } catch (e: unknown) {
       if (generation !== loadGenerationRef.current) return
@@ -137,7 +146,7 @@ export function LfmPipelinePanel() {
 
   const refreshStoredInfo = useCallback(async (id: string) => {
     const m = MODELS.find((model) => model.id === id) ?? MODELS[0]
-    const stored = await listStoredModels()
+    const stored = await listStoredModels(MODEL_BASE)
     setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
   }, [])
 

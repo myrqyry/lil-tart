@@ -54,6 +54,14 @@ entrypoint.
 - `@litert-playground/image-embedding`
 - `@litert-playground/video-classification`
 
+Subpath entrypoints are part of the supported surface on the same terms as the
+`.` entrypoint: a subpath is supported only when the compatibility harness
+resolves it through the packed tarball. Consumers must not reach past a published
+subpath into a package's `src` directory.
+
+- `@litert-playground/retrieval/scoring` — late-interaction scoring without the
+  ColBERT pipeline entrypoint
+
 For the local conversational-inference stack specifically, the reusable boundary
 is:
 

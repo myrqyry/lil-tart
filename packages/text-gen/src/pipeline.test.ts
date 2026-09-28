@@ -165,6 +165,58 @@ describe("LiteRtLmTextPipeline", () => {
       })
     );
   });
+
+  // The manifest path is repo-relative. Handing it straight to the engine makes the
+  // browser resolve it against the app origin, which 404s; it has to go through the
+  // runtime's asset resolver so the configured model base applies.
+  it("resolves the model through the asset resolver instead of passing the raw path", async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]));
+        controller.close();
+      },
+    });
+    const assets = {
+      resolve: vi.fn(),
+      stream: vi.fn().mockResolvedValue(stream),
+    };
+    const context: RuntimeContext = {
+      ...fakeContext(),
+      assets: assets as unknown as RuntimeContext["assets"],
+    };
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+    await p.load(context);
+
+    expect(assets.stream).toHaveBeenCalledWith(
+      {
+        id: "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+        path: "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      },
+      { signal: undefined }
+    );
+    expect(assets.resolve).not.toHaveBeenCalled();
+    expect(mockEngineCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: stream })
+    );
+  });
+
+  it("falls back to a Blob when the resolver cannot stream", async () => {
+    const bytes = new ArrayBuffer(4);
+    const assets = { resolve: vi.fn().mockResolvedValue(bytes) };
+    const context: RuntimeContext = {
+      ...fakeContext(),
+      assets: assets as unknown as RuntimeContext["assets"],
+    };
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+    await p.load(context);
+
+    expect(assets.resolve).toHaveBeenCalledTimes(1);
+    const passed = mockEngineCreate.mock.calls[0][0].model;
+    expect(passed).toBeInstanceOf(Blob);
+    expect(await (passed as Blob).arrayBuffer()).toEqual(bytes);
+  });
 });
 
 describe("selectTextGenerationManifest", () => {

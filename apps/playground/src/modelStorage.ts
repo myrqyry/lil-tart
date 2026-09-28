@@ -42,6 +42,15 @@ function resolvedAssetUrl(path: string, base: string): string {
   return new URL(path, new URL(base, pageBase())).href
 }
 
+// Cache keys embed the resolved absolute URL, so changing a resolver's base
+// orphans everything written under the previous base. Entries recorded against
+// another base can never be read again, so they must not be counted as stored
+// and should be reclaimable.
+function belongsToBase(assetUrl: string | null | undefined, base: string): boolean {
+  if (!assetUrl) return false
+  return assetUrl.startsWith(new URL(base, pageBase()).href)
+}
+
 export function registerModelAssets(modelId: string, paths: readonly string[]): void {
   for (const path of paths) {
     if (!path) continue
@@ -104,7 +113,7 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
   }
 }
 
-export async function listStoredModels(): Promise<StoredModelInfo[]> {
+export async function listStoredModels(base: string): Promise<StoredModelInfo[]> {
   const storage = cacheStorage()
   if (!storage) return []
 
@@ -117,6 +126,7 @@ export async function listStoredModels(): Promise<StoredModelInfo[]> {
       const modelId = modelIdFromRequest(request)
       if (!modelId) continue
       const response = await cache.match(request)
+      if (!belongsToBase(response?.headers.get('x-lil-tart-asset-url'), base)) continue
       const bytes = Number(response?.headers.get('x-lil-tart-bytes') ?? 0)
       const current = models.get(modelId) ?? { modelId, bytes: 0, assets: 0 }
       current.bytes += Number.isFinite(bytes) ? bytes : 0
@@ -127,6 +137,30 @@ export async function listStoredModels(): Promise<StoredModelInfo[]> {
     return [...models.values()].sort((a, b) => a.modelId < b.modelId ? -1 : a.modelId > b.modelId ? 1 : 0)
   } catch {
     return []
+  }
+}
+
+// Reclaims entries for one model that were written under a superseded base.
+// Only called with the base the caller is actively using, so it cannot touch
+// another panel's cache. Returns how many entries were removed.
+export async function pruneSupersededModelCaches(modelId: string, base: string): Promise<number> {
+  const storage = cacheStorage()
+  if (!storage) return 0
+
+  try {
+    const cache = await storage.open(CACHE_NAME)
+    const requests = await cache.keys()
+    let removed = 0
+    for (const request of requests) {
+      if (modelIdFromRequest(request) !== modelId) continue
+      const response = await cache.match(request)
+      if (belongsToBase(response?.headers.get('x-lil-tart-asset-url'), base)) continue
+      if (await cache.delete(request)) removed += 1
+    }
+    return removed
+  } catch {
+    // Storage may be unavailable or blocked.
+    return 0
   }
 }
 

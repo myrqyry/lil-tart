@@ -176,6 +176,22 @@ async function readStream(
   return { text: full, ...(reasoning ? { reasoning } : {}) };
 }
 
+// ponytail: manifest asset paths are repo-relative, so they must travel through the
+// runtime's asset resolver. Handing the raw path to the engine would let the browser
+// resolve it against the app origin instead of the configured model base.
+async function resolveModelInput(
+  context: RuntimeContext,
+  path: string,
+): Promise<string | Blob | ReadableStream<Uint8Array>> {
+  const assets = context?.assets
+  if (typeof assets?.resolve !== 'function') return path
+  const asset = { id: path, path }
+  if (typeof assets.stream === 'function') {
+    return assets.stream(asset, { signal: context.signal })
+  }
+  return new Blob([await assets.resolve(asset, { signal: context.signal })])
+}
+
 export class LiteRtLmTextPipeline
   implements Pipeline<TextGenerationInput, TextInferenceResult, LiteRtLmTextConfig>
 {
@@ -208,10 +224,11 @@ export class LiteRtLmTextPipeline
       this.report({ phase: 'loading', step: 1, total: 2 });
       const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
       this.report({ phase: 'loading', step: 2, total: 2 });
-      const model =
+      const modelPath =
         this.manifest.assets.find((a) => a.id === 'model')?.path ??
         this.manifest.assets[0]?.path ??
         DEFAULTS.model;
+      const model = await resolveModelInput(context, modelPath);
       const backend = context.backend === 'webnn' ? undefined : context.backend;
       this.engine = await module.Engine.create({
         model,

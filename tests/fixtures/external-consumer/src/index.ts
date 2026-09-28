@@ -4,6 +4,7 @@ import { createBrowserCacheAssetResolver } from '@litert-playground/browser-cach
 import { LiteRtLmTextPipeline } from '@litert-playground/text-gen'
 import { EncoderPipeline } from '@litert-playground/encoder'
 import { ColBertPipeline } from '@litert-playground/retrieval'
+import { maxSim, rankDense } from '@litert-playground/retrieval/scoring'
 import { KokoroPipeline } from '@litert-playground/kokoro'
 import { Qwen3TtsPipeline } from '@litert-playground/qwen3-tts'
 import { ClipImageEmbeddingPipeline } from '@litert-playground/image-embedding'
@@ -17,6 +18,8 @@ export const importedPackages = [
   LiteRtLmTextPipeline,
   EncoderPipeline,
   ColBertPipeline,
+  maxSim,
+  rankDense,
   KokoroPipeline,
   Qwen3TtsPipeline,
   ClipImageEmbeddingPipeline,

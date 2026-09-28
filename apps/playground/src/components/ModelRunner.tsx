@@ -98,8 +98,8 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   }, [])
 
   const refreshStoredModels = useCallback(async () => {
-    setStoredModels(await listStoredModels())
-  }, [])
+    setStoredModels(await listStoredModels(modelBase))
+  }, [modelBase])
 
   useEffect(() => {
     void refreshStoredModels()
