@@ -191,7 +191,6 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     [storedModels],
   )
   const selectedLoaded = !!selectedAdapter && !selectedAdapter.isPipeline && loaded && loadedModelId === selectedAdapter.modelId
-  const executionBackend = selectedLoaded ? modelInfo?.requestedBackend ?? null : null
   const backendConstraints = selectedAdapter && !selectedAdapter.isPipeline
     ? [
         ...(selectedAdapter.requiredBackend ? [{ graph: 'main', backend: selectedAdapter.requiredBackend }] : []),
@@ -203,6 +202,9 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const activeBackendOverrides = accelerator === 'auto'
     ? []
     : backendConstraints.filter((constraint) => constraint.backend !== accelerator)
+  const runtimeFallbackCount = selectedLoaded
+    ? runtimePathProof?.fallbackCount ?? modelInfo?.fallbackCount ?? 0
+    : 0
   const storedBytes = storedModels.reduce((total, model) => total + model.bytes, 0)
   const orphanedBytes = orphanedModels.reduce((total, model) => total + model.bytes, 0)
   const recentTelemetry = telemetry.slice(-4).reverse()
@@ -213,9 +215,10 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     progressPercent: downloadProgress?.totalBytes ? progressPercent(downloadProgress) : null,
     error,
     requestedBackend: accelerator,
-    executionBackend,
     resolvedBackend: selectedLoaded ? resolvedAccelerator : null,
-    fallbackCount: selectedLoaded ? modelInfo?.fallbackCount ?? 0 : 0,
+    backendOverrides: activeBackendOverrides,
+    runtimeGraphBackends: runtimePathProof?.graphBackends ?? [],
+    fallbackCount: runtimeFallbackCount,
     preflightComplete: selectedLoaded && preflight !== null,
     pathProofAvailable: selectedLoaded && runtimePathProof !== null,
   })
@@ -344,10 +347,15 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                 <div>
                   <p className="text-sm font-medium text-on-surface-variant">Runtime receipt</p>
                   <p className="mt-0.5 text-base font-semibold text-on-surface">
-                    {executionBackend && executionBackend !== accelerator
-                      ? `selected ${accelerator.toUpperCase()} → runtime request ${executionBackend.toUpperCase()} → resolved ${(resolvedAccelerator ?? 'unknown').toUpperCase()}`
-                      : `requested ${accelerator.toUpperCase()} → resolved ${(resolvedAccelerator ?? 'unknown').toUpperCase()}`}
+                    main graph: request {(modelInfo?.requestedBackend ?? accelerator).toUpperCase()} → resolved {(resolvedAccelerator ?? 'unknown').toUpperCase()}
                   </p>
+                  {activeBackendOverrides.length > 0 && (
+                    <p className="mt-1 text-xs text-on-surface-variant">
+                      selected {accelerator.toUpperCase()} · pinned graph requests: {activeBackendOverrides
+                        .map(({ graph, backend }) => `${graph} → ${backend.toUpperCase()}`)
+                        .join(', ')}
+                    </p>
+                  )}
                   {selectedAdapter.metadata.tags.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
                       {selectedAdapter.metadata.tags.map(t => (
@@ -372,8 +380,8 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   <p className="font-medium text-on-surface">{metric(modelInfo?.compileDurationMs)}</p>
                 </div>
                 <div>
-                  <p className="text-on-surface-variant">Fallbacks</p>
-                  <p className="font-medium text-on-surface">{modelInfo?.fallbackCount ?? 0}</p>
+                  <p className="text-on-surface-variant">{runtimePathProof ? 'Session fallbacks' : 'Main fallbacks'}</p>
+                  <p className="font-medium text-on-surface">{runtimeFallbackCount}</p>
                 </div>
                 <div>
                   <p className="text-on-surface-variant">Preflight inference</p>
@@ -391,14 +399,23 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                     <div>
                       <p className="text-sm font-semibold text-on-surface">Session path proof captured</p>
                       <p className="mt-0.5 text-xs text-on-surface-variant">
-                        {runtimePathProof.selectedBackend !== runtimePathProof.requestedBackend
-                          ? `selected ${runtimePathProof.selectedBackend.toUpperCase()} → runtime request ${runtimePathProof.requestedBackend.toUpperCase()} → resolved ${runtimePathProof.resolvedBackend.toUpperCase()}`
-                          : `requested ${runtimePathProof.requestedBackend.toUpperCase()} → resolved ${runtimePathProof.resolvedBackend.toUpperCase()}`}
+                        selected {runtimePathProof.selectedBackend.toUpperCase()} · {runtimePathProof.graphBackends.length} graph {runtimePathProof.graphBackends.length === 1 ? 'path' : 'paths'}
                       </p>
                     </div>
                     <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
                       {runtimePathProof.inferenceEvents.length} inference {runtimePathProof.inferenceEvents.length === 1 ? 'event' : 'events'}
                     </span>
+                  </div>
+                  <div className="mt-2 space-y-1 font-mono text-xs text-on-surface-variant">
+                    {runtimePathProof.graphBackends.map((graph) => (
+                      <div key={graph.graph} className="flex flex-wrap justify-between gap-2">
+                        <span>{graph.graph}</span>
+                        <span>
+                          request {graph.requestedBackend.toUpperCase()} → resolved {graph.resolvedBackend.toUpperCase()}
+                          {graph.fallbackCount > 0 ? ` · ${graph.fallbackCount} fallback${graph.fallbackCount === 1 ? '' : 's'}` : ''}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                   <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-on-surface-variant">
                     <span>{runtimePathProof.outputCount} parsed {runtimePathProof.outputCount === 1 ? 'output' : 'outputs'}</span>
@@ -417,7 +434,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   <div className="space-y-1 font-mono text-xs text-on-surface-variant">
                     {recentTelemetry.map((entry, index) => (
                       <div key={`${entry.timestamp}-${entry.event}-${index}`} className="flex flex-wrap justify-between gap-2">
-                        <span>{entry.event} · {entry.resolvedBackend}</span>
+                        <span>{entry.event} · request {entry.requestedBackend} → resolved {entry.resolvedBackend}</span>
                         <span>
                           {entry.inferenceDurationMs !== undefined
                             ? `${Math.round(entry.inferenceDurationMs)} ms`
@@ -450,7 +467,11 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
               className="inline-flex items-center justify-center rounded-lg bg-primary px-5 py-2 text-sm font-medium text-on-primary shadow-md transition-all duration-300 hover:scale-[1.02] hover:shadow-lg active:scale-[0.97] disabled:opacity-50 disabled:shadow-none"
               style={{ transitionTimingFunction: 'var(--ease-spring)' }}
             >
-              {operation === 'inference' ? 'Running inference…' : `Run Inference (${(resolvedAccelerator ?? accelerator).toUpperCase()})`}
+              {operation === 'inference'
+                ? 'Running inference…'
+                : activeBackendOverrides.length > 0
+                  ? 'Run Inference (mixed backends)'
+                  : `Run Inference (${(resolvedAccelerator ?? accelerator).toUpperCase()})`}
             </button>
 
             <OutputViewer outputs={outputs} outputTensors={outputTensors} outputSpecs={outputSpecs} />
