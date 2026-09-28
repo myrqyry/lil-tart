@@ -251,7 +251,7 @@ export const yolo11SegAdapter: ModelAdapter = {
 export const yolov8SegAdapter: ModelAdapter = {
   modelId: 'yolov8-seg',
   metadata: { name: 'YOLOv8m Segmentation', description: 'EdgeFirst YOLOv8 segmentation INT8', modelPath: '/models/yolov8-seg/yolov8m-seg-int8-smart.tflite', tags: ['vision', 'segmentation'] },
-  disabled: true, // ponytail: no HF LiteRT mirror — needs locating
+  disabled: true, // HF int8 export now exists, but its uint8 input + split int8 outputs do not match this placeholder contract.
   inputSpecs: [s('input', 'float32', [1, 640, 640, 3], 'RGB NHWC')],
   outputSpecs: [s('output', 'float32', [1, 116, 8400], 'Detection + mask coeffs')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
