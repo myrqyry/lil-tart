@@ -222,6 +222,8 @@ export class LiteRtLmTextPipeline
   private conversation: LiteRtLmConversation | null = null;
   private loadMs = 0;
   private loadAbort: AbortController | null = null;
+  private loadToken = 0;
+  private disposed = false;
   private readonly options: LiteRtLmTextPipelineOptions;
 
   constructor(
@@ -241,15 +243,21 @@ export class LiteRtLmTextPipeline
 
   async load(context: RuntimeContext): Promise<void> {
     if (this.status === 'ready') return;
+    // A disposed pipeline stays disposed; nothing may load through it again.
+    if (this.disposed) return;
     this.status = 'loading';
     this.context = context;
     const loadStart = performance.now();
     const controller = new AbortController();
     this.loadAbort = controller;
+    const token = ++this.loadToken;
     // Cancelling from either side has to reach the transfer: the caller's signal,
-    // or dispose() on this pipeline.
+    // or dispose() on this pipeline. An already-aborted signal has already dispatched
+    // its event and will never dispatch again, so it has to be checked directly --
+    // the same thing the runtime does before subscribing.
     const onExternalAbort = () => controller.abort();
-    context.signal?.addEventListener('abort', onExternalAbort, { once: true });
+    if (context.signal?.aborted) controller.abort();
+    else context.signal?.addEventListener('abort', onExternalAbort, { once: true });
     try {
       this.report({ phase: 'loading', step: 1, total: 2 });
       const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
@@ -259,18 +267,37 @@ export class LiteRtLmTextPipeline
         this.manifest.assets[0]?.path ??
         DEFAULTS.model;
       const model = await this.resolveModelInput(modelPath, controller.signal);
+      // Do not start a multi-hundred-megabyte compile for a pipeline that was
+      // disposed while the model was still arriving. Reject rather than resolve:
+      // the caller asked for a model and did not get one.
+      if (token !== this.loadToken) {
+        throw new InferenceError('CANCELLED', 'Pipeline was disposed during model load', {
+          asset: modelPath,
+        });
+      }
       const backend = context.backend === 'webnn' ? undefined : context.backend;
-      this.engine = await module.Engine.create({
+      const engine = await module.Engine.create({
         model,
         backend,
         mainExecutorSettings: { maxNumTokens: DEFAULTS.maxContextTokens },
       });
+      // dispose() can land while the engine is still compiling, and aborting the
+      // fetch cannot stop that. The late result must be released, not published,
+      // or a disposed pipeline resurrects itself and leaks the engine.
+      if (token !== this.loadToken) {
+        await engine.delete();
+        throw new InferenceError('CANCELLED', 'Pipeline was disposed during model load', {
+          asset: modelPath,
+        });
+      }
+      this.engine = engine;
       this.loadMs = performance.now() - loadStart;
       this.status = 'ready';
     } catch (e) {
       // A cancelled load is not a failure of the model; leave the pipeline
-      // retryable rather than latched to 'error'.
-      this.status = controller.signal.aborted ? 'idle' : 'error';
+      // retryable rather than latched to 'error'. Disposal wins the race: a
+      // cancelled load must not stamp 'idle' over an already disposed pipeline.
+      this.status = this.disposed ? 'disposed' : controller.signal.aborted ? 'idle' : 'error';
       throw e instanceof Error ? e : new Error(String(e));
     } finally {
       context.signal?.removeEventListener('abort', onExternalAbort);
@@ -342,9 +369,13 @@ export class LiteRtLmTextPipeline
   }
 
   async dispose(): Promise<void> {
+    // Record disposal before anything else so an in-flight load cannot overwrite it.
+    this.disposed = true;
     // Stop an in-flight model download even when the caller wired no signal.
     this.loadAbort?.abort();
     this.loadAbort = null;
+    // Invalidate any load still awaiting a result.
+    this.loadToken += 1;
     await this.conversation?.delete();
     this.conversation = null;
     await this.engine?.delete();

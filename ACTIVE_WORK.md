@@ -216,6 +216,50 @@ actual generation run in a browser.
   upstream, or by fetching the URL in the pipeline and handing `response.body` to
   the engine. That is a cross-cutting design change, not a review fix, and is
   **not done**. Worth deciding deliberately.
+- Cache membership is decided by the base an entry was **written with** (a
+  `x-lil-tart-base` header), not by a path prefix. Prefix matching is too loose once
+  bases are nested: an entry cached at `https://host/v1/model.tflite` does sit under
+  `https://host/`, but after widening the base the resolver asks for
+  `https://host/model.tflite` and never reads it, so counting it would reintroduce
+  the exact "stored locally but re-downloads" lie this work removed. Entries written
+  before the header existed carry no recorded base and fall back to the structural
+  prefix comparison, so no existing cache is invalidated on upgrade.
+- A `dispose()` that lands while `Engine.create` or `loadModel` is still pending
+  cannot cancel that work. All three pipelines carry a `loadToken`, and `dispose()`
+  also sets an explicit `disposed` flag *before* aborting, so:
+  - a result that arrives late is released, not published (text generation deletes
+    the orphaned engine outright because WASM engine memory is not tracked by the
+    runtime; encoder and colbert only skip publishing, since the runtime owns and
+    disposes the compiled model);
+  - a `load()` abandoned by disposal **rejects** with `CANCELLED` rather than
+    resolving quietly, because the caller asked for a model and did not get one;
+  - the `catch` reports `disposed` when disposal won the race, instead of stamping
+    `idle` over an already disposed pipeline;
+  - a tokenizer fetch completing after disposal does not repopulate state.
+  Awaiting the in-flight `load()` inside `dispose()` was considered and rejected:
+  guarding the assignment sites makes correctness independent of ordering, and
+  blocking `dispose()` on a multi-hundred-megabyte compile would be its own problem.
+- An already-aborted `context.signal` is now handled explicitly in all three
+  pipelines. Subscribing to a settled signal never fires, so `addEventListener`
+  alone was an elaborate way to do nothing: a caller that cancelled before dialling
+  got a full checkpoint download anyway. The playground masked this because
+  `RuntimeContext.signal` is the same object the runtime holds, but a consumer
+  implementing the public contract with its own signal would have hit it. This
+  mirrors `startPendingLoad` in `runtime-litert/src/context.ts`, which already had
+  the `if (runtimeSignal.aborted)` branch.
+- **A test of mine could not fail, and it is worth recording as a lesson.** The LFM
+  cancellation guard compared two `indexOf` offsets. A missing needle returns `-1`
+  and `-1 < anything`, so deleting the very line the test existed to protect still
+  passed. Confirmed by mutation: with the old assertion the suite reported 15/15
+  green after removing the abort line; with the fix it fails. Any offset comparison
+  must assert both sides are non-negative first, and the slice should be bounded to
+  the function under test.
+- Rejected after checking, worth recording so nobody re-raises it: the model runtime
+  **is** recreated when `modelBase` changes. The `[modelBase]` effect in
+  `useModelRunner.ts:322` returns a cleanup that runs on every base change and does
+  `runtimePromiseRef.current = null` before disposing, so the next `ensureRuntime()`
+  builds a fresh runtime with the new base. A review claimed the memoized runtime
+  survives the change; it does not.
 - Text models bypass Cache Storage entirely (see the trade-off note above). This
   is also why `storedInfo` is null for them in the LFM panel: the panel renders
   "Stored locally · N MB" only when `storedInfo` is set and otherwise labels the

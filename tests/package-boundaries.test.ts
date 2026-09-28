@@ -144,10 +144,19 @@ describe('workspace package boundaries', () => {
     expect(panel).toMatch(/const loadAbort = new AbortController\(\)/)
     expect(panel).toMatch(/signal: loadAbort\.signal/)
     // The abort has to happen before the pipeline it belongs to is discarded.
-    const dispose = panel.slice(panel.indexOf('const disposePipeline'))
-    expect(dispose.indexOf('loadAbortRef.current?.abort()')).toBeLessThan(
-      dispose.indexOf('await pipeline.dispose()'),
-    )
+    // Both offsets must exist first: indexOf returns -1 for a missing needle, and
+    // -1 is less than any real index, so comparing without checking would pass with
+    // the abort line deleted.
+    const disposeStart = panel.indexOf('const disposePipeline')
+    const disposeEnd = panel.indexOf('const load = async')
+    expect(disposeStart).toBeGreaterThanOrEqual(0)
+    expect(disposeEnd).toBeGreaterThan(disposeStart)
+    const dispose = panel.slice(disposeStart, disposeEnd)
+    const abortAt = dispose.indexOf('loadAbortRef.current?.abort()')
+    const disposeAt = dispose.indexOf('await pipeline.dispose()')
+    expect(abortAt).toBeGreaterThanOrEqual(0)
+    expect(disposeAt).toBeGreaterThanOrEqual(0)
+    expect(abortAt).toBeLessThan(disposeAt)
   })
 
   it('keeps the retrieval scoring subpath a verified public entrypoint', async () => {    const manifest = JSON.parse(await text('packages/retrieval/package.json')) as {

@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix(playground)`: scope model-cache removal to a base, so reclaiming a previous-base download no longer also deletes the live copy of a model that is cached under both
 - `fix(text-gen)`: export `LiteRtLmTextPipelineOptions` from the package entrypoint so consumers can name the type of the constructor option they pass
 - `fix(playground)`: match cache entries against the model base structurally, so a base without a trailing slash no longer claims sibling paths that share its leading characters
+- `fix(playground)`: decide cached-asset membership from the base an entry was written with, so widening a nested base (`/v1/` to `/`) stops reporting unreachable bytes as stored. Entries predating the recorded base still fall back to the prefix comparison
+- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a dispose that lands while the engine or model is still compiling no longer lets the late result resurrect a disposed pipeline. text generation releases the orphaned engine explicitly
+- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a load that is cancelled because the pipeline was disposed now reports `disposed` rather than stamping `idle` over it, and a load abandoned by disposal rejects instead of resolving as if it succeeded
+- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: an already-aborted context signal now stops a load immediately. Subscribing to a settled signal never fires, so a caller that cancelled before dialling would otherwise start a full checkpoint download
+- `fix(playground)`: reject loads attempted on a disposed pipeline, and stop a tokenizer fetch that completes after disposal from repopulating pipeline state
+- `test`: the LFM cancellation guard asserted an offset comparison that could not fail, since a missing needle yields -1 and -1 sorts before any real index. It now asserts both offsets exist, and is bounded to the dispose function
 - `fix(retrieval)`: remove unused retrieval state that broke stricter downstream TypeScript consumers
 - `fix`: cache LiteRT runtime in `ensureRuntime` and persist Ready badge (`packages/runtime-litert/src/context.ts:90`, `packages/runtime-litert/src/types.ts:96`)
 - `fix`: make MoViNet frame commit transactional and correct WASM probes

@@ -1,4 +1,5 @@
 import {
+  InferenceError,
   type EmbeddingInferenceResult,
   type ModelManifest,
   type Pipeline,
@@ -66,6 +67,8 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
   private tokenizer: TransformersTokenizer | null = null
   private loadMs = 0
   private loadAbort: AbortController | null = null
+  private loadToken = 0
+  private disposed = false
 
   constructor(options: EncoderPipelineOptions = {}) {
     this.manifest = options.manifest ?? encoder230mManifest
@@ -73,6 +76,8 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
 
   async load(context: RuntimeContext): Promise<void> {
     if (this.status === 'ready') return
+    // A disposed pipeline stays disposed; nothing may load through it again.
+    if (this.disposed) return
     this.status = 'loading'
     this.context = context
     const start = performance.now()
@@ -80,23 +85,40 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
     // because transformers.js exposes no signal for from_pretrained.
     const controller = new AbortController()
     this.loadAbort = controller
+    const token = ++this.loadToken
+    // An already-aborted signal has already dispatched its event and will never
+    // dispatch again, so it must be checked directly before subscribing. This
+    // mirrors what the runtime does in startPendingLoad.
     const onExternalAbort = () => controller.abort()
-    context.signal?.addEventListener('abort', onExternalAbort, { once: true })
+    if (context.signal?.aborted) controller.abort()
+    else context.signal?.addEventListener('abort', onExternalAbort, { once: true })
     try {
       this.report({ phase: 'loading-tokenizer', step: 1, total: 3 })
       const transformers = (await import('@huggingface/transformers')) as unknown as TransformersModule
       // ponytail: repo id is the first two path segments of any asset URL
       const repoId = this.manifest.assets[0].path.split('/').slice(0, 2).join('/')
       this.tokenizer = await transformers.AutoTokenizer.from_pretrained(repoId)
+      // A dispose landing during the tokenizer fetch must not repopulate state.
+      // Reject rather than resolve: the caller asked for a model and did not get one.
+      if (token !== this.loadToken) {
+        throw new InferenceError('CANCELLED', 'Pipeline was disposed during load')
+      }
       this.report({ phase: 'loading-model', step: 2, total: 3 })
       const modelPath = this.manifest.assets[0].path
-      this.model = (await context.liteRt.loadModel(modelPath, { signal: controller.signal })) as CompiledModel
+      const model = (await context.liteRt.loadModel(modelPath, { signal: controller.signal })) as CompiledModel
+      // A dispose landing during the load must not resurrect the pipeline. The
+      // runtime still owns the compiled model and disposes it with itself.
+      if (token !== this.loadToken) {
+        throw new InferenceError('CANCELLED', 'Pipeline was disposed during load')
+      }
+      this.model = model
       this.report({ phase: 'ready', step: 3, total: 3 })
       this.loadMs = performance.now() - start
       this.status = 'ready'
     } catch (e) {
-      // A cancelled load is retryable, not a model failure.
-      this.status = controller.signal.aborted ? 'idle' : 'error'
+      // A cancelled load is retryable, not a model failure. Disposal wins the
+      // race: a cancelled load must not stamp 'idle' over a disposed pipeline.
+      this.status = this.disposed ? 'disposed' : controller.signal.aborted ? 'idle' : 'error'
       throw e instanceof Error ? e : new Error(String(e))
     } finally {
       context.signal?.removeEventListener('abort', onExternalAbort)
@@ -140,9 +162,13 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
   }
 
   async dispose(): Promise<void> {
+    // Record disposal before anything else so an in-flight load cannot overwrite it.
+    this.disposed = true
     // Stop an in-flight model download even when the caller wired no signal.
     this.loadAbort?.abort()
     this.loadAbort = null
+    // Invalidate any load still awaiting a result.
+    this.loadToken += 1
     this.model = null
     this.tokenizer = null
     this.context = null

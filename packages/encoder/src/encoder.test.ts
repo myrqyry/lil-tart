@@ -86,6 +86,14 @@ describe('meanPool', () => {
   })
 })
 
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`timed out waiting for ${label}`)
+}
+
 describe('EncoderPipeline cancellation', () => {
   function hangingContext() {
     const seen = { signal: null as AbortSignal | null }
@@ -112,10 +120,14 @@ describe('EncoderPipeline cancellation', () => {
     const { seen, context: ctx } = hangingContext()
     const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
     const loading = pipeline.load(ctx as never)
+    // Time the dispose so it lands while the model load is genuinely in flight.
+    await waitFor(() => seen.signal !== null, 'loadModel to start')
     await pipeline.dispose()
 
     await expect(loading).rejects.toThrow()
     expect(seen.signal?.aborted).toBe(true)
+    // A cancelled load must not stamp 'idle' over an already disposed pipeline.
+    expect(pipeline.status).toBe('disposed')
   })
 
   it("follows the caller's signal and stays retryable", async () => {
@@ -129,5 +141,46 @@ describe('EncoderPipeline cancellation', () => {
     expect(seen.signal?.aborted).toBe(true)
     // Cancelled is not latched to 'error', so a retry is possible.
     expect(pipeline.status).toBe('idle')
+  })
+
+  it('refuses to load through an already-aborted signal', async () => {
+    const { seen, context: ctx } = hangingContext()
+    const controller = new AbortController()
+    controller.abort()
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+
+    await expect(
+      pipeline.load({ ...ctx, signal: controller.signal } as never),
+    ).rejects.toThrow()
+    // addEventListener on a settled signal never fires, so this only passes if the
+    // already-aborted case is handled explicitly.
+    expect(seen.signal?.aborted).toBe(true)
+  })
+
+  it('does not resurrect a disposed pipeline when the model resolves late', async () => {
+    const slow = fakeModel
+    let release = () => {}
+    const pending = new Promise<typeof slow>((resolve) => {
+      release = () => resolve(slow)
+    })
+    let seenLoad = false
+    const ctx = {
+      ...context,
+      liteRt: {
+        ...context.liteRt,
+        loadModel: vi.fn(() => {
+          seenLoad = true;
+          return pending;
+        }),
+      },
+    }
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    const loading = pipeline.load(ctx as never)
+    await waitFor(() => seenLoad, 'loadModel to start')
+    await pipeline.dispose()
+    release()
+    await expect(loading).rejects.toThrow(/disposed/i)
+
+    expect(pipeline.status).toBe('disposed')
   })
 })

@@ -43,13 +43,30 @@ function stubFetch() {
       controller.close();
     },
   });
-  const mock = vi.fn().mockResolvedValue({ ok: true, status: 200, body });
+  // Behaves like native fetch: an already-aborted signal rejects immediately rather
+  // than resolving, which is the whole point of threading the signal through.
+  const mock = vi.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+    if (init?.signal?.aborted) {
+      return Promise.reject(new DOMException("aborted", "AbortError"));
+    }
+    return Promise.resolve({ ok: true, status: 200, body });
+  });
   const original = globalThis.fetch;
   globalThis.fetch = mock as unknown as typeof fetch;
   afterEach(() => {
     globalThis.fetch = original;
   });
   return mock;
+}
+
+// Waits until `predicate` holds, so a dispose can be timed to land while the call
+// under test is genuinely in flight rather than before it starts.
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`timed out waiting for ${label}`);
 }
 
 function streamOf(chunks: string[]): ReadableStream<{ text: string }> {  return new ReadableStream({
@@ -309,6 +326,74 @@ describe("LiteRtLmTextPipeline", () => {
     } finally {
       globalThis.fetch = original;
     }
+  });
+
+  it("does not resurrect a disposed pipeline when the engine finishes late", async () => {
+    stubFetch();
+    // The response body is already consumed; only the engine compile is pending,
+    // and an abort cannot cancel that.
+    let releaseEngine = () => {};
+    const compiling = new Promise<unknown>((resolve) => {
+      releaseEngine = () =>
+        resolve({ createConversation: vi.fn(), delete: vi.fn(async () => undefined) });
+    });
+    mockEngineCreate.mockReturnValue(compiling);
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    const loading = p.load(fakeContext());
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, "engine compile to start");
+    await p.dispose();
+    releaseEngine();
+
+    // Rejects rather than resolving: the caller asked for a model and did not get one.
+    await expect(loading).rejects.toThrow(/disposed/i);
+    // Disposed stays disposed, and the late engine is released rather than kept.
+    expect(p.status).toBe("disposed");
+  });
+
+  it("deletes an engine that resolves after disposal", async () => {
+    stubFetch();
+    const lateEngine = {
+      createConversation: vi.fn(),
+      delete: vi.fn(async () => undefined),
+    };
+    let releaseEngine = () => {};
+    mockEngineCreate.mockReturnValue(
+      new Promise<unknown>((resolve) => {
+        releaseEngine = () => resolve(lateEngine);
+      })
+    );
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    const loading = p.load(fakeContext());
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, "engine compile to start");
+    await p.dispose();
+    releaseEngine();
+    await expect(loading).rejects.toThrow(/disposed/i);
+
+    expect(lateEngine.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to download through an already-aborted signal", async () => {
+    const fetchMock = stubFetch();
+    const controller = new AbortController();
+    controller.abort();
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+
+    await expect(p.load({ ...fakeContext(), signal: controller.signal })).rejects.toThrow(
+      /cancelled/i
+    );
+    // addEventListener on a settled signal never fires, so without the explicit
+    // pre-abort check the fetch would start anyway.
+    const passedSignal = fetchMock.mock.calls[0][1]?.signal as AbortSignal | undefined;
+    expect(passedSignal?.aborted).toBe(true);
+    expect(p.status).toBe("idle");
   });
 
   it("resolves against a model base that has no trailing slash", async () => {

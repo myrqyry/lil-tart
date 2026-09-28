@@ -14,6 +14,7 @@ interface FakeEntry {
   url: string
   bytes: number
   assetUrl: string
+  base?: string
 }
 
 // One shared store, so deletions persist across open() calls the way real
@@ -41,7 +42,9 @@ function cache() {
               ? String(entry.bytes)
               : name === 'x-lil-tart-asset-url'
                 ? entry.assetUrl
-                : null,
+                : name === 'x-lil-tart-base'
+                  ? entry.base ?? null
+                  : null,
         },
       }
     },
@@ -142,6 +145,42 @@ describe('listStoredModels', () => {
     expect(await listStoredModels('https://huggingface.co/litert-community')).toEqual([
       { modelId: 'model', bytes: 100, assets: 1 },
     ])
+  })
+
+  // A path prefix is too loose once bases are nested. Cached at /v1/, the entry is
+  // unreachable once the base is the root, because the resolver now asks for
+  // /model.tflite. Counting it would report bytes as stored that get re-downloaded.
+  it('orphans a nested-base entry once the base widens to its root', async () => {
+    seed([
+      {
+        url: cacheKeyUrl('model', 'https://host/v1/model.tflite'),
+        bytes: 900,
+        assetUrl: 'https://host/v1/model.tflite',
+        base: 'https://host/v1/',
+      },
+    ])
+
+    expect(await listStoredModels('https://host/')).toEqual([])
+    expect(await listOrphanedModels('https://host/')).toEqual([
+      { modelId: 'model', bytes: 900, assets: 1 },
+    ])
+    // Still recoverable by switching the base back.
+    expect(await listStoredModels('https://host/v1/')).toEqual([
+      { modelId: 'model', bytes: 900, assets: 1 },
+    ])
+  })
+
+  it('treats bases that normalize to the same URL as the same base', async () => {
+    seed([
+      {
+        url: cacheKeyUrl('model', 'https://host/model.tflite'),
+        bytes: 100,
+        assetUrl: 'https://host/model.tflite',
+        base: 'https://host/',
+      },
+    ])
+
+    expect(await listStoredModels('https://host')).toEqual([{ modelId: 'model', bytes: 100, assets: 1 }])
   })
 })
 
