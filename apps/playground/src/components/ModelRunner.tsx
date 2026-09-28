@@ -5,7 +5,9 @@ import type { ModelAdapter, TensorSpec } from '../adapters/types'
 import { getTartGuideMessage } from '../tartGuide'
 import {
   clearStoredModels,
+  listOrphanedModels,
   listStoredModels,
+  removeOrphanedModel,
   removeStoredModel,
   type StoredModelInfo,
 } from '../modelStorage'
@@ -89,6 +91,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const [storedModels, setStoredModels] = useState<StoredModelInfo[]>([])
+  const [orphanedModels, setOrphanedModels] = useState<StoredModelInfo[]>([])
   const [storageBusy, setStorageBusy] = useState(false)
   const [modelBaseInput, setModelBaseInput] = useState(modelBase)
 
@@ -98,8 +101,9 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   }, [])
 
   const refreshStoredModels = useCallback(async () => {
-    setStoredModels(await listStoredModels())
-  }, [])
+    setStoredModels(await listStoredModels(modelBase))
+    setOrphanedModels(await listOrphanedModels(modelBase))
+  }, [modelBase])
 
   useEffect(() => {
     void refreshStoredModels()
@@ -134,7 +138,19 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     setStorageBusy(true)
     try {
       if (loadedModelId === modelId) await handleUnload()
-      await removeStoredModel(modelId)
+      await removeStoredModel(modelId, modelBase)
+      await refreshStoredModels()
+    } finally {
+      setStorageBusy(false)
+    }
+  }
+
+  // Reclaims only the bytes written under a previous base. The live copy is a
+  // different cache entry and must survive, so this does not unload the model.
+  const handleRemoveOrphaned = async (modelId: string) => {
+    setStorageBusy(true)
+    try {
+      await removeOrphanedModel(modelId, modelBase)
       await refreshStoredModels()
     } finally {
       setStorageBusy(false)
@@ -176,6 +192,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   )
   const selectedLoaded = !!selectedAdapter && !selectedAdapter.isPipeline && loaded && loadedModelId === selectedAdapter.modelId
   const storedBytes = storedModels.reduce((total, model) => total + model.bytes, 0)
+  const orphanedBytes = orphanedModels.reduce((total, model) => total + model.bytes, 0)
   const recentTelemetry = telemetry.slice(-4).reverse()
   const tartGuide = getTartGuideMessage({
     selectedModelName: selectedAdapter?.metadata.name ?? null,
@@ -201,7 +218,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-1.5">
-            {storedModels.length > 0 && (
+            {(storedModels.length > 0 || orphanedModels.length > 0) && (
               <div className="flex items-center gap-1 text-xs text-on-surface-variant">
                 <span>{storedModels.length} downloaded · {formatBytes(storedBytes)}</span>
                 <button
@@ -210,8 +227,28 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   disabled={storageBusy || loading}
                   className="rounded-md px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
                 >
-                  Clear
+                  Clear all
                 </button>
+              </div>
+            )}
+
+            {orphanedModels.length > 0 && (
+              <div className="flex items-center gap-1 text-xs text-on-surface-variant">
+                <span>
+                  {orphanedModels.length} previous-base or unverified downloads · {formatBytes(orphanedBytes)}
+                </span>
+                {orphanedModels.map((model) => (
+                  <button
+                    key={model.modelId}
+                    type="button"
+                    title={model.unverified ? 'Load this model to verify its older cache metadata, or use Clear all to remove all downloads.' : `Remove ${model.modelId}`}
+                    onClick={() => void handleRemoveOrphaned(model.modelId)}
+                    disabled={storageBusy || loading || model.unverified}
+                    className="rounded-md px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
+                  >
+                    {model.unverified ? 'Unverified' : 'Remove'} {model.modelId}
+                  </button>
+                ))}
               </div>
             )}
 

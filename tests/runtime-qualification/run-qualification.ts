@@ -7,6 +7,7 @@ import { qwenBrowserMemoryGeneratorCase } from './qwen-browsermemory-generator/c
 import { runBrowserQualification } from './shared/browserHarness'
 import type { QualificationBackend, QualificationResult, QualificationSelection } from './schema/types'
 import { tinyLitertBaselineCase } from './tiny-litert-baseline/case'
+import { pipelineLoadCancellationCase } from './pipeline-load-cancellation/case'
 
 export interface QualificationCliOptions {
   caseIds?: string[]
@@ -17,6 +18,7 @@ export interface QualificationCliOptions {
 
 const cases = [
   tinyLitertBaselineCase,
+  pipelineLoadCancellationCase,
   efficientDetDynamicOutputCase,
   qwenOmniMtpStandaloneCase,
   qwenBrowserMemoryGeneratorCase,
@@ -61,8 +63,8 @@ export function formatQualificationMatrix(results: QualificationResult[]): strin
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
-  if (args.includes('--help')) return
   const options = parseQualificationArgs(args)
+  if (args.includes('--help')) return
   const selection: QualificationSelection = {
     caseIds: options.caseIds,
     backends: options.backends,

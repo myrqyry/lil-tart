@@ -60,10 +60,14 @@ export interface RuntimeContext {
   liteRt: LiteRtRuntime
 }
 
+export interface LiteRtLoadOptions {
+  signal?: AbortSignal
+}
+
 export interface LiteRtRuntime {
-  loadModel(path: string): Promise<any>
-  loadNpy(path: string): Promise<Float32Array>
-  fetchBuffer(path: string): Promise<ArrayBuffer>
+  loadModel(path: string, options?: LiteRtLoadOptions): Promise<any>
+  loadNpy(path: string, signal?: AbortSignal): Promise<Float32Array>
+  fetchBuffer(path: string, signal?: AbortSignal): Promise<ArrayBuffer>
 }
 
 export type PipelineStatus = 'idle' | 'loading' | 'ready' | 'running' | 'error' | 'disposed'

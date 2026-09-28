@@ -1,4 +1,5 @@
 import {
+  InferenceError,
   type ModelManifest,
   type Pipeline,
   type PipelineProgress,
@@ -176,6 +177,40 @@ async function readStream(
   return { text: full, ...(reasoning ? { reasoning } : {}) };
 }
 
+// ponytail: manifest asset paths are repo-relative. Handing one to the engine raw lets the
+// browser resolve it against the app origin, which 404s, so the caller supplies the model
+// base and the path is made absolute. The pipeline fetches with an abort signal
+// and passes the response body to the engine. Deliberately not routed through
+// context.assets.stream(): resolvers in this repo
+// materialize the whole checkpoint into an ArrayBuffer before wrapping it in a
+// ReadableStream, and a full buffered read is the wrong memory trade for a
+// multi-billion-parameter model in a browser.
+function resolveModelReference(path: string, base?: string): string {
+  if (!base) return path
+  const pageBase = (globalThis as { location?: { href: string } }).location?.href ?? 'http://localhost/'
+  try {
+    return new URL(path, new URL(base, pageBase)).href
+  } catch {
+    return path
+  }
+}
+
+function modelFetchError(path: string, error: unknown, signal: AbortSignal): Error {
+  if (signal.aborted) {
+    return new InferenceError('CANCELLED', `Model download cancelled for ${path}`, { asset: path, cause: error })
+  }
+  return new InferenceError('ASSET_FETCH_FAILED', `Failed to fetch model ${path}: ${String(error)}`, {
+    asset: path,
+    cause: error,
+  })
+}
+
+export interface LiteRtLmTextPipelineOptions {
+  // Base the manifest's repo-relative asset path is resolved against. Omit to
+  // pass the path through unchanged.
+  modelBase?: string;
+}
+
 export class LiteRtLmTextPipeline
   implements Pipeline<TextGenerationInput, TextInferenceResult, LiteRtLmTextConfig>
 {
@@ -187,8 +222,16 @@ export class LiteRtLmTextPipeline
   private engine: LiteRtLmEngine | null = null;
   private conversation: LiteRtLmConversation | null = null;
   private loadMs = 0;
+  private loadAbort: AbortController | null = null;
+  private loadToken = 0;
+  private disposed = false;
+  private readonly options: LiteRtLmTextPipelineOptions;
 
-  constructor(manifestOrModelId: ModelManifest | string = litertLmManifest) {
+  constructor(
+    manifestOrModelId: ModelManifest | string = litertLmManifest,
+    options: LiteRtLmTextPipelineOptions = {}
+  ) {
+    this.options = options;
     this.manifest =
       typeof manifestOrModelId === 'string'
         ? resolveTextGenerationManifest(manifestOrModelId) ?? {
@@ -200,30 +243,100 @@ export class LiteRtLmTextPipeline
   }
 
   async load(context: RuntimeContext): Promise<void> {
+    if (this.disposed) throw new InferenceError('CANCELLED', 'Pipeline is disposed');
     if (this.status === 'ready') return;
     this.status = 'loading';
     this.context = context;
     const loadStart = performance.now();
+    const controller = new AbortController();
+    this.loadAbort = controller;
+    const token = ++this.loadToken;
+    // Cancelling from either side has to reach the transfer: the caller's signal,
+    // or dispose() on this pipeline. An already-aborted signal has already dispatched
+    // its event and will never dispatch again, so it has to be checked directly --
+    // the same thing the runtime does before subscribing.
+    const onExternalAbort = () => controller.abort();
+    if (context.signal?.aborted) controller.abort();
+    else context.signal?.addEventListener('abort', onExternalAbort, { once: true });
+    // Cancellation arrives two ways, and both have to be checked at every point where a
+    // result would be published. Disposal or a superseding load bumps loadToken; a caller
+    // aborting context.signal only flips controller.signal, and it cannot stop a compile
+    // that is already under way, so the late result has to be recognised as cancelled.
+    const cancelled = () => token !== this.loadToken || controller.signal.aborted;
     try {
       this.report({ phase: 'loading', step: 1, total: 2 });
       const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
       this.report({ phase: 'loading', step: 2, total: 2 });
-      const model =
+      const modelPath =
         this.manifest.assets.find((a) => a.id === 'model')?.path ??
         this.manifest.assets[0]?.path ??
         DEFAULTS.model;
+      const model = await this.resolveModelInput(modelPath, controller.signal);
+      // Do not start a multi-hundred-megabyte compile for a pipeline that was
+      // disposed while the model was still arriving. Reject rather than resolve:
+      // the caller asked for a model and did not get one.
+      if (cancelled()) {
+        throw new InferenceError('CANCELLED', 'Model load was cancelled', { asset: modelPath });
+      }
       const backend = context.backend === 'webnn' ? undefined : context.backend;
-      this.engine = await module.Engine.create({
+      const engine = await module.Engine.create({
         model,
         backend,
         mainExecutorSettings: { maxNumTokens: DEFAULTS.maxContextTokens },
       });
+      // Disposal or caller cancellation can land during compilation; aborting the
+      // fetch cannot stop that. The late result must be released, not published,
+      // or a cancelled pipeline publishes a live engine.
+      if (cancelled()) {
+        let cleanupError: unknown;
+        try { await engine.delete(); } catch (error) { cleanupError = error; }
+        throw new InferenceError('CANCELLED', 'Model load was cancelled', {
+          asset: modelPath,
+          cause: cleanupError,
+        });
+      }
+      this.engine = engine;
       this.loadMs = performance.now() - loadStart;
       this.status = 'ready';
     } catch (e) {
-      this.status = 'error';
+      // A cancelled load is not a failure of the model; leave the pipeline
+      // retryable rather than latched to 'error'. Disposal wins the race: a
+      // cancelled load must not stamp 'idle' over an already disposed pipeline.
+      this.status = this.disposed ? 'disposed' : controller.signal.aborted ? 'idle' : 'error';
       throw e instanceof Error ? e : new Error(String(e));
+    } finally {
+      context.signal?.removeEventListener('abort', onExternalAbort);
     }
+  }
+
+  // With a model base, the fetch happens here so it can be aborted. The engine's own
+  // model fetch takes no signal, so a multi-gigabyte checkpoint cannot otherwise be
+  // cancelled when the caller switches models mid-download. Handing the engine the
+  // response body keeps the memory and streaming behaviour identical, because
+  // Engine.create treats a string and a ReadableStream the same way from there on.
+  private async resolveModelInput(
+    path: string,
+    signal: AbortSignal,
+  ): Promise<string | ReadableStream<Uint8Array>> {
+    const base = this.options.modelBase
+    // No base means nothing to resolve against, so keep the engine's own fetch.
+    if (!base) return path
+
+    const url = resolveModelReference(path, base)
+    let response: Response
+    try {
+      // credentials mirrors the engine's model fetch so a same-origin model server
+      // still works.
+      response = await fetch(url, { signal, credentials: 'same-origin' })
+    } catch (error) {
+      throw modelFetchError(path, error, signal)
+    }
+    if (!response.ok || !response.body) {
+      throw new InferenceError('ASSET_FETCH_FAILED', `HTTP ${response.status} fetching model ${path}`, {
+        asset: path,
+      })
+    }
+    return response.body
   }
 
   async run(
@@ -247,7 +360,7 @@ export class LiteRtLmTextPipeline
       if (signal?.aborted) throw new Error('CANCELLED');
       const stream = this.conversation.sendMessageStreaming(prompt);
       const { text, reasoning } = await readStream(stream, signal, cfg.onToken, cfg.onReasoning);
-      this.status = 'ready';
+      this.status = this.disposed ? 'disposed' : 'ready';
       return {
         kind: 'text',
         text,
@@ -255,18 +368,32 @@ export class LiteRtLmTextPipeline
       } satisfies TextInferenceResult;
     } catch (e) {
       this.conversation?.cancel();
-      this.status = 'ready';
+      this.status = this.disposed ? 'disposed' : 'ready';
       throw e instanceof Error ? e : new Error(String(e));
     }
   }
 
   async dispose(): Promise<void> {
-    await this.conversation?.delete();
+    // Record disposal before anything else so an in-flight load cannot overwrite it.
+    this.disposed = true;
+    // Stop an in-flight model download even when the caller wired no signal.
+    this.loadAbort?.abort();
+    this.loadAbort = null;
+    // Invalidate any load still awaiting a result.
+    this.loadToken += 1;
+    const conversation = this.conversation;
+    const engine = this.engine;
     this.conversation = null;
-    await this.engine?.delete();
     this.engine = null;
     this.context = null;
     this.status = 'disposed';
+    // Each cleanup gets an attempt even if the other rejects. Keep the terminal
+    // state truthful and propagate cleanup errors to the caller.
+    const errors: unknown[] = [];
+    try { await conversation?.delete(); } catch (error) { errors.push(error); }
+    try { await engine?.delete(); } catch (error) { errors.push(error); }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw Object.assign(new Error('Pipeline cleanup failed'), { errors });
   }
 
   private report(progress: PipelineProgress): void {

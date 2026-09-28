@@ -1,5 +1,6 @@
 import { loadAndCompile, loadLiteRt, setWebGpuDevice, Tensor } from '@litertjs/core'
 import { createLiteRtRuntime } from '../../packages/runtime-litert/src/context'
+import { probeAbortStopsTransfer } from './pipeline-load-cancellation/probeTransfer'
 import { GeneratorPhase } from '../../packages/qwen3-tts/src/phases/generator'
 import {
   createQualificationTypedArray,
@@ -64,6 +65,8 @@ Object.assign(window, {
       const verified = await verifyQualificationAsset(buffer, descriptor)
       return Array.from(new Uint8Array(verified))
     },
+    // Exercise the buffered resolver used by runtime-litert model loading.
+    probeAbortStopsTransfer,
     runModuleWorkerLoader() {
       const worker = new Worker(
         new URL('./module-worker-loader/worker.ts', import.meta.url),

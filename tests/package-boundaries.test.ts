@@ -113,6 +113,71 @@ describe('workspace package boundaries', () => {
     expect(retrievalEntrypoint).toContain('rankColBert')
   })
 
+  // One model id can hold cache entries under more than one model base at once, so a
+  // "reclaim the previous base" affordance routed through an unqualified delete takes
+  // the live copy with it. Both halves are asserted: the storage API is base-scoped, and
+  // the orphan row in the UI uses the orphan-scoped variant.
+  it('keeps model-cache removal base-scoped in storage and at the call site', async () => {
+    const storage = await text('apps/playground/src/modelStorage.ts')
+    expect(storage).toMatch(/export async function removeStoredModel\(modelId: string, base: string\)/)
+    expect(storage).toMatch(/export async function removeOrphanedModel\(modelId: string, base: string\)/)
+    expect(storage).not.toMatch(/removeStoredModel\(modelId: string\)/)
+
+    const modelRunner = await text('apps/playground/src/components/ModelRunner.tsx')
+    expect(modelRunner).toContain('removeOrphanedModel(modelId, modelBase)')
+    expect(modelRunner).toContain('removeStoredModel(modelId, modelBase)')
+    const orphanRow = modelRunner.slice(modelRunner.indexOf('orphanedModels.length > 0'))
+    expect(orphanRow).toContain('handleRemoveOrphaned(model.modelId)')
+    expect(orphanRow).not.toContain('handleRemoveStored(model.modelId)')
+
+    const lfmPanel = await text('apps/playground/src/components/LfmPipelinePanel.tsx')
+    expect(lfmPanel).toContain('removeStoredModel(entry.manifest.modelId, MODEL_BASE)')
+  })
+
+  // The engine's own model fetch takes no signal, so a multi-gigabyte checkpoint
+  // cannot be cancelled unless the caller supplies one. Assert the panel actually
+  // wires it, because the playground test environment is `node` and cannot observe
+  // component behaviour.
+  it('gives the LFM panel a real cancellation path for model downloads', async () => {
+    const panel = await text('apps/playground/src/components/LfmPipelinePanel.tsx')
+    expect(panel).toContain('loadAbortRef')
+    expect(panel).toMatch(/const loadAbort = new AbortController\(\)/)
+    expect(panel).toMatch(/signal: loadAbort\.signal/)
+    // The abort has to happen before the pipeline it belongs to is discarded.
+    // Both offsets must exist first: indexOf returns -1 for a missing needle, and
+    // -1 is less than any real index, so comparing without checking would pass with
+    // the abort line deleted.
+    const disposeStart = panel.indexOf('const disposePipeline')
+    const disposeEnd = panel.indexOf('const load = async')
+    expect(disposeStart).toBeGreaterThanOrEqual(0)
+    expect(disposeEnd).toBeGreaterThan(disposeStart)
+    const dispose = panel.slice(disposeStart, disposeEnd)
+    const abortAt = dispose.indexOf('loadAbortRef.current?.abort()')
+    const disposeAt = dispose.indexOf('await pipeline.dispose()')
+    expect(abortAt).toBeGreaterThanOrEqual(0)
+    expect(disposeAt).toBeGreaterThanOrEqual(0)
+    expect(abortAt).toBeLessThan(disposeAt)
+  })
+
+  it('keeps the retrieval scoring subpath a verified public entrypoint', async () => {    const manifest = JSON.parse(await text('packages/retrieval/package.json')) as {
+      exports?: Record<string, string>
+    }
+
+    expect(manifest.exports).toMatchObject({
+      '.': './src/index.ts',
+      './scoring': './src/scoring.ts',
+    })
+
+    const scoringEntrypoint = await text('packages/retrieval/src/scoring.ts')
+    expect(scoringEntrypoint).toContain('rankColBert')
+    expect(scoringEntrypoint).toContain('rankDense')
+    expect(scoringEntrypoint).not.toMatch(/from '\.\/colbert'/)
+    expect(scoringEntrypoint).not.toContain('@huggingface/transformers')
+
+    const externalConsumer = await text('tests/fixtures/external-consumer/src/index.ts')
+    expect(externalConsumer).toContain("from '@litert-playground/retrieval/scoring'")
+  })
+
   it('keeps runtime and Qwen packages externally consumable through peer contracts', async () => {
     const runtime = JSON.parse(await text('packages/runtime-litert/package.json')) as {
       dependencies?: Record<string, string>

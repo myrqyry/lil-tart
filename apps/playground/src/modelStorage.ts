@@ -13,6 +13,7 @@ export interface StoredModelInfo {
   modelId: string
   bytes: number
   assets: number
+  unverified?: boolean
 }
 
 function pageBase(): string {
@@ -40,6 +41,37 @@ function modelIdFromRequest(request: Request): string | null {
 
 function resolvedAssetUrl(path: string, base: string): string {
   return new URL(path, new URL(base, pageBase())).href
+}
+
+function normalizeBase(base: string): string {
+  return new URL(base, pageBase()).href
+}
+
+// Membership follows the resolver's exact URL semantics, including absolute,
+// root-relative and slash-less paths. Old entries may lack the original path;
+// recover it from registered assets when possible, otherwise preserve the bytes
+// as unverified rather than guessing that they are safe to delete.
+function belongsToBase(response: Response | undefined, modelId: string, base: string): boolean | null {
+  const assetUrl = response?.headers.get('x-lil-tart-asset-url')
+  if (!assetUrl) return null
+  try {
+    const target = normalizeBase(base)
+    const path = response?.headers.get('x-lil-tart-asset-path')
+    if (path) return resolvedAssetUrl(path, target) === assetUrl
+
+    const recordedBase = response?.headers.get('x-lil-tart-base')
+    const candidates = [...assetOwners].filter(([, owner]) => owner === modelId)
+    // A currently registered path resolving to this key proves reachability even
+    // when the cache predates path/base metadata.
+    if (candidates.some(([candidate]) => resolvedAssetUrl(candidate, target) === assetUrl)) return true
+    if (recordedBase) {
+      if (normalizeBase(recordedBase) === target) return true
+      if (candidates.some(([candidate]) => resolvedAssetUrl(candidate, recordedBase) === assetUrl)) return false
+    }
+    return null
+  } catch {
+    return null
+  }
 }
 
 export function registerModelAssets(modelId: string, paths: readonly string[]): void {
@@ -80,6 +112,8 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
               'x-lil-tart-bytes': String(fresh.byteLength),
               'x-lil-tart-model-id': owner,
               'x-lil-tart-asset-url': assetUrl,
+              'x-lil-tart-base': normalizeBase(base),
+              'x-lil-tart-asset-path': asset.path,
             },
           }),
         )
@@ -104,7 +138,19 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
   }
 }
 
-export async function listStoredModels(): Promise<StoredModelInfo[]> {
+export async function listStoredModels(base: string): Promise<StoredModelInfo[]> {
+  return collectStoredModels(base, true)
+}
+
+// Lists unreachable and unverified legacy entries without deleting them. The
+// free-text ModelRunner leaves them for deliberate removal. The fixed-base LFM
+// panel also calls pruneSupersededModelCaches after loading; that removes only
+// proven orphans for its model. Unverified entries are retained in both paths.
+export async function listOrphanedModels(base: string): Promise<StoredModelInfo[]> {
+  return collectStoredModels(base, false)
+}
+
+async function collectStoredModels(base: string, keepMatching: boolean): Promise<StoredModelInfo[]> {
   const storage = cacheStorage()
   if (!storage) return []
 
@@ -117,10 +163,13 @@ export async function listStoredModels(): Promise<StoredModelInfo[]> {
       const modelId = modelIdFromRequest(request)
       if (!modelId) continue
       const response = await cache.match(request)
+      const matches = belongsToBase(response, modelId, base)
+      if (keepMatching ? matches !== true : matches === true) continue
       const bytes = Number(response?.headers.get('x-lil-tart-bytes') ?? 0)
       const current = models.get(modelId) ?? { modelId, bytes: 0, assets: 0 }
       current.bytes += Number.isFinite(bytes) ? bytes : 0
       current.assets += 1
+      if (matches === null) current.unverified = true
       models.set(modelId, current)
     }
 
@@ -130,18 +179,56 @@ export async function listStoredModels(): Promise<StoredModelInfo[]> {
   }
 }
 
-export async function removeStoredModel(modelId: string): Promise<void> {
+// Reclaims proven orphans for one model relative to the supplied base. This is
+// currently called only by the fixed-base LFM panel. Another panel using the same
+// model id at a different base would share this deletion scope. Unknown legacy
+// entries are never pruned. Returns how many entries were removed.
+export async function pruneSupersededModelCaches(modelId: string, base: string): Promise<number> {
+  const storage = cacheStorage()
+  if (!storage) return 0
+
+  try {
+    const cache = await storage.open(CACHE_NAME)
+    const requests = await cache.keys()
+    let removed = 0
+    for (const request of requests) {
+      if (modelIdFromRequest(request) !== modelId) continue
+      const response = await cache.match(request)
+      if (belongsToBase(response, modelId, base) !== false) continue
+      if (await cache.delete(request)) removed += 1
+    }
+    return removed
+  } catch {
+    // Storage may be unavailable or blocked.
+    return 0
+  }
+}
+
+// Base-scoped removal. A model id can hold entries under more than one base, so
+// every delete must say which ones it means: otherwise a "reclaim the previous
+// base" action also destroys the live copy.
+export async function removeStoredModel(modelId: string, base: string): Promise<void> {
+  await removeMatching(modelId, base, true)
+}
+
+export async function removeOrphanedModel(modelId: string, base: string): Promise<void> {
+  await removeMatching(modelId, base, false)
+}
+
+async function removeMatching(modelId: string, base: string, keepMatching: boolean): Promise<void> {
   const storage = cacheStorage()
   if (!storage) return
 
   try {
     const cache = await storage.open(CACHE_NAME)
     const requests = await cache.keys()
-    await Promise.all(
-      requests
-        .filter((request) => modelIdFromRequest(request) === modelId)
-        .map((request) => cache.delete(request)),
-    )
+    for (const request of requests) {
+      if (modelIdFromRequest(request) !== modelId) continue
+      const response = await cache.match(request)
+      const matches = belongsToBase(response, modelId, base)
+      if (matches !== keepMatching) continue
+      await cache.delete(request)
+    }
   } catch {
     // Storage may be unavailable or blocked.
   }

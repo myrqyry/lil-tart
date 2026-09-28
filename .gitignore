@@ -9,3 +9,7 @@ static-models/
 .idea/
 *.code-workspace
 .vercel
+
+# meristem:local-ignore:start
+.meristem/local/
+# meristem:local-ignore:end

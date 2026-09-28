@@ -51,6 +51,7 @@ describe('EncoderPipeline', () => {
     await pipeline.load(context)
     expect(context.liteRt.loadModel).toHaveBeenCalledWith(
       'litert-community/LFM2.5-Encoder-230M/resolve/main/LFM2.5-Encoder-230M_fp16.tflite',
+      { signal: expect.any(AbortSignal) },
     )
     expect(pipeline.status).toBe('ready')
   })
@@ -82,5 +83,161 @@ describe('meanPool', () => {
 
   it('returns zeros for empty input', () => {
     expect(Array.from(meanPool(new Float32Array(0), 2, 3))).toEqual([0, 0, 0])
+  })
+})
+
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`timed out waiting for ${label}`)
+}
+
+describe('EncoderPipeline cancellation', () => {
+  function hangingContext() {
+    const seen = { signal: null as AbortSignal | null }
+    return {
+      seen,
+      context: {
+        ...context,
+        liteRt: {
+          ...context.liteRt,
+          loadModel: vi.fn((_path: string, options?: { signal?: AbortSignal }) => {
+            seen.signal = options?.signal ?? null
+            return new Promise((_resolve, reject) => {
+              const fail = () => reject(new Error('CANCELLED'))
+              if (options?.signal?.aborted) fail()
+              else options?.signal?.addEventListener('abort', fail)
+            })
+          }),
+        },
+      },
+    }
+  }
+
+  it('aborts an in-flight model load when disposed', async () => {
+    const { seen, context: ctx } = hangingContext()
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    const loading = pipeline.load(ctx as never)
+    // Time the dispose so it lands while the model load is genuinely in flight.
+    await waitFor(() => seen.signal !== null, 'loadModel to start')
+    await pipeline.dispose()
+
+    await expect(loading).rejects.toThrow()
+    expect(seen.signal?.aborted).toBe(true)
+    // A cancelled load must not stamp 'idle' over an already disposed pipeline.
+    expect(pipeline.status).toBe('disposed')
+  })
+
+  it("follows the caller's signal and stays retryable", async () => {
+    const { seen, context: ctx } = hangingContext()
+    const controller = new AbortController()
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    const loading = pipeline.load({ ...ctx, signal: controller.signal } as never)
+    // Abort once the model load is genuinely in flight, not before it starts.
+    await waitFor(() => seen.signal !== null, 'loadModel to start')
+    controller.abort()
+
+    await expect(loading).rejects.toThrow()
+    expect(seen.signal?.aborted).toBe(true)
+    // Cancelled is not latched to 'error', so a retry is possible.
+    expect(pipeline.status).toBe('idle')
+  })
+
+  it('rejects a load attempted after disposal', async () => {
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    await pipeline.dispose()
+
+    // Resolving here would tell the caller the model is ready when there is no model.
+    await expect(pipeline.load(context as never)).rejects.toThrow(/disposed/i)
+  })
+
+  it('refuses to load through an already-aborted signal', async () => {
+    const { seen, context: ctx } = hangingContext()
+    const controller = new AbortController()
+    controller.abort()
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+
+    await expect(
+      pipeline.load({ ...ctx, signal: controller.signal } as never),
+    ).rejects.toThrow()
+    // addEventListener on a settled signal never fires, so this only passes if the
+    // already-aborted case is handled explicitly. The model load is then never started
+    // at all, rather than started and immediately cancelled.
+    expect(seen.signal).toBeNull()
+  })
+
+  it('does not resurrect a disposed pipeline when the model resolves late', async () => {
+    const slow = fakeModel
+    let release = () => {}
+    const pending = new Promise<typeof slow>((resolve) => {
+      release = () => resolve(slow)
+    })
+    let seenLoad = false
+    const ctx = {
+      ...context,
+      liteRt: {
+        ...context.liteRt,
+        loadModel: vi.fn(() => {
+          seenLoad = true;
+          return pending;
+        }),
+      },
+    }
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    const loading = pipeline.load(ctx as never)
+    await waitFor(() => seenLoad, 'loadModel to start')
+    await pipeline.dispose()
+    release()
+    await expect(loading).rejects.toThrow(/cancelled/i)
+
+    expect(pipeline.status).toBe('disposed')
+  })
+})
+
+
+describe('EncoderPipeline disposal boundaries', () => {
+  it('rejects loading an already disposed instance', async () => {
+    const pipeline = new EncoderPipeline()
+    await pipeline.dispose()
+    const loadModel = vi.fn()
+    await expect(pipeline.load({ liteRt: { loadModel } } as never)).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(loadModel).not.toHaveBeenCalled()
+    expect(pipeline.status).toBe('disposed')
+  })
+
+  it('does not retain a tokenizer that finishes after disposal', async () => {
+    const { AutoTokenizer } = await import('@huggingface/transformers')
+    let release!: (value: unknown) => void
+    const pending = new Promise(resolve => { release = resolve })
+    vi.mocked(AutoTokenizer.from_pretrained).mockReturnValueOnce(pending as never)
+    const pipeline = new EncoderPipeline()
+    const loadModel = vi.fn()
+    const loading = pipeline.load({ liteRt: { loadModel } } as never)
+    await waitFor(() => vi.mocked(AutoTokenizer.from_pretrained).mock.results.some(r => r.value === pending), 'tokenizer to start')
+    await pipeline.dispose()
+    release({ encode: vi.fn() })
+    await expect(loading).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(loadModel).not.toHaveBeenCalled()
+    // Retention is the defect: status alone cannot detect this leak.
+    expect(pipeline).toHaveProperty('tokenizer', null)
+    expect(pipeline.status).toBe('disposed')
+  })
+
+  it('keeps disposed status when an in-flight inference finishes', async () => {
+    let release!: () => void
+    const run = vi.fn(() => new Promise(resolve => {
+      release = () => resolve([{ data: async () => new Float32Array([1, 2]) }])
+    }))
+    const pipeline = new EncoderPipeline()
+    await pipeline.load({ liteRt: { loadModel: async () => ({ run }) } } as never)
+    const running = pipeline.run({ text: 'hello' }, { maxTokens: 1 })
+    await waitFor(() => run.mock.calls.length > 0, 'inference to start')
+    await pipeline.dispose()
+    release()
+    await running
+    expect(pipeline.status).toBe('disposed')
+    await expect(pipeline.load({} as never)).rejects.toMatchObject({ code: 'CANCELLED' })
   })
 })

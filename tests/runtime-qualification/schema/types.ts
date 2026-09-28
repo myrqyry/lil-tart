@@ -64,6 +64,7 @@ export interface QualificationContext {
 export interface QualificationRuntime {
   initialize?(): Promise<void>
   runModuleWorkerLoader?(): Promise<QualificationObservation>
+  probeAbortStopsTransfer?(): Promise<QualificationObservation>
   loadAndCompile(
     model: Uint8Array,
     options: { accelerator: QualificationBackend },
@@ -136,6 +137,9 @@ export interface QualificationCase {
   id: string
   description: string
   evidenceKind: QualificationEvidenceKind
+  // Declares that the run needs the generated probe asset origin. The harness uses this
+  // to decide whether to bind that server at all, so an unrelated case never pays for it.
+  requiresProbeAsset?: boolean
   model?: QualificationModel
   environments: QualificationEnvironment[]
   expected: {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeContext } from '@litert-playground/inference-core';
 import { TransformersTextPipeline } from "./transformers-pipeline";
 import { LiteRtLmTextPipeline } from "./litertlm-pipeline";
@@ -34,8 +34,42 @@ function fakeContext(): RuntimeContext {
   };
 }
 
-function streamOf(chunks: string[]): ReadableStream<{ text: string }> {
-  return new ReadableStream({
+// A model fetch stub that hands back a real response body, which is what the
+// pipeline must pass to the engine in place of a bare URL.
+function stubFetch() {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array([1]));
+      controller.close();
+    },
+  });
+  // Behaves like native fetch: an already-aborted signal rejects immediately rather
+  // than resolving, which is the whole point of threading the signal through.
+  const mock = vi.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+    if (init?.signal?.aborted) {
+      return Promise.reject(new DOMException("aborted", "AbortError"));
+    }
+    return Promise.resolve({ ok: true, status: 200, body });
+  });
+  const original = globalThis.fetch;
+  globalThis.fetch = mock as unknown as typeof fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+  });
+  return mock;
+}
+
+// Waits until `predicate` holds, so a dispose can be timed to land while the call
+// under test is genuinely in flight rather than before it starts.
+async function waitFor(predicate: () => boolean, label: string): Promise<void> {
+  for (let i = 0; i < 100; i++) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
+function streamOf(chunks: string[]): ReadableStream<{ text: string }> {  return new ReadableStream({
     start(controller) {
       for (const c of chunks) controller.enqueue({ text: c });
       controller.close();
@@ -165,6 +199,245 @@ describe("LiteRtLmTextPipeline", () => {
       })
     );
   });
+
+  // The manifest path is repo-relative. Handing it to the engine raw makes the
+  // browser resolve it against the app origin, which 404s, so it has to be made
+  // absolute. The pipeline hands the response body to the engine: routing through
+  // context.assets would materialize the whole model into an ArrayBuffer first,
+  // which is the wrong memory trade for a 1.2B-parameter model in a browser.
+  it("fetches the absolute URL and hands the response stream to the engine", async () => {
+    const fetchMock = stubFetch();
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    await p.load(fakeContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      expect.objectContaining({ credentials: "same-origin" })
+    );
+
+    // The engine must receive the response body, not the URL, so the transfer is ours.
+    const passed = mockEngineCreate.mock.calls[0][0].model;
+    expect(passed).toBeInstanceOf(ReadableStream);
+    expect(typeof passed).not.toBe("string");
+  });
+
+  it("never buffers the checkpoint through the asset resolver", async () => {
+    const fetchMock = stubFetch();
+    const resolve = vi.fn();
+    const stream = vi.fn();
+    const context: RuntimeContext = {
+      ...fakeContext(),
+      assets: { resolve, stream } as unknown as RuntimeContext["assets"],
+    };
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    await p.load(context);
+
+    // Buffering here is the regression this test exists to prevent.
+    expect(resolve).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the model download when the caller's signal aborts", async () => {
+    const controller = new AbortController();
+    const seenSignal = { current: null as AbortSignal | null };
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+      seenSignal.current = init?.signal ?? null;
+      return Promise.reject(new DOMException("aborted", "AbortError"));
+    }) as unknown as typeof fetch;
+    const context: RuntimeContext = { ...fakeContext(), signal: controller.signal };
+
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+        modelBase: "https://huggingface.co/",
+      });
+      const loading = p.load(context);
+      controller.abort();
+      await expect(loading).rejects.toThrow(/cancelled/i);
+
+      // The signal handed to fetch is the one we control.
+      expect(seenSignal.current?.aborted).toBe(true);
+      // Cancelled is retryable, not latched to 'error'.
+      expect(p.status).toBe("idle");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("cancels an in-flight download when the pipeline is disposed", async () => {
+    const seenSignal = { current: null as AbortSignal | null };
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+      seenSignal.current = init?.signal ?? null;
+      return new Promise((_resolve, reject) => {
+        const fail = () => reject(new DOMException("aborted", "AbortError"));
+        // Native fetch rejects immediately for an already-aborted signal.
+        if (init?.signal?.aborted) fail();
+        else init?.signal?.addEventListener("abort", fail);
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+        modelBase: "https://huggingface.co/",
+      });
+      const loading = p.load(fakeContext());
+      await p.dispose();
+      await expect(loading).rejects.toThrow(/cancelled/i);
+      expect(seenSignal.current?.aborted).toBe(true);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("reports a failed model fetch as a fetch error, not a cancellation", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, body: null });
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+        modelBase: "https://huggingface.co/",
+      });
+      await expect(p.load(fakeContext())).rejects.toThrow(/HTTP 404/);
+      expect(p.status).toBe("error");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("leaves the engine's own fetch alone when no model base is set", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn();
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+      await p.load(fakeContext());
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(mockEngineCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model:
+            "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+        })
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("does not resurrect a disposed pipeline when the engine finishes late", async () => {
+    stubFetch();
+    // The response body is already consumed; only the engine compile is pending,
+    // and an abort cannot cancel that.
+    let releaseEngine = () => {};
+    const compiling = new Promise<unknown>((resolve) => {
+      releaseEngine = () =>
+        resolve({ createConversation: vi.fn(), delete: vi.fn(async () => undefined) });
+    });
+    mockEngineCreate.mockReturnValue(compiling);
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    const loading = p.load(fakeContext());
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, "engine compile to start");
+    await p.dispose();
+    releaseEngine();
+
+    // Rejects rather than resolving: the caller asked for a model and did not get one.
+    await expect(loading).rejects.toThrow(/cancelled/i);
+    // Disposed stays disposed, and the late engine is released rather than kept.
+    expect(p.status).toBe("disposed");
+  });
+
+  // The response body is consumed and the compile is under way when the caller cancels.
+  // Aborting cannot stop a compile, so the guard has to notice controller.signal
+  // rather than only the dispose token, or the cancelled load still ends up 'ready'.
+  it("discards an engine that completes after the caller aborts", async () => {
+    stubFetch();
+    const lateEngine = {
+      createConversation: vi.fn(),
+      delete: vi.fn(async () => undefined),
+    };
+    let releaseEngine = () => {};
+    mockEngineCreate.mockReturnValue(
+      new Promise<unknown>((resolve) => {
+        releaseEngine = () => resolve(lateEngine);
+      })
+    );
+
+    const controller = new AbortController();
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    const loading = p.load({ ...fakeContext(), signal: controller.signal });
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, "engine compile to start");
+    controller.abort();
+    releaseEngine();
+
+    await expect(loading).rejects.toThrow(/cancelled/i);
+    expect(lateEngine.delete).toHaveBeenCalledTimes(1);
+    expect(p.status).not.toBe("ready");
+  });
+
+  it("deletes an engine that resolves after disposal", async () => {
+    stubFetch();
+    const lateEngine = {
+      createConversation: vi.fn(),
+      delete: vi.fn(async () => undefined),
+    };
+    let releaseEngine = () => {};
+    mockEngineCreate.mockReturnValue(
+      new Promise<unknown>((resolve) => {
+        releaseEngine = () => resolve(lateEngine);
+      })
+    );
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    const loading = p.load(fakeContext());
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, "engine compile to start");
+    await p.dispose();
+    releaseEngine();
+    await expect(loading).rejects.toThrow(/cancelled/i);
+
+    expect(lateEngine.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses to download through an already-aborted signal", async () => {
+    const fetchMock = stubFetch();
+    const controller = new AbortController();
+    controller.abort();
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+
+    await expect(p.load({ ...fakeContext(), signal: controller.signal })).rejects.toThrow(
+      /cancelled/i
+    );
+    // addEventListener on a settled signal never fires, so without the explicit
+    // pre-abort check the fetch would start anyway.
+    const passedSignal = fetchMock.mock.calls[0][1]?.signal as AbortSignal | undefined;
+    expect(passedSignal?.aborted).toBe(true);
+    expect(p.status).toBe("idle");
+  });
+
+  it("resolves against a model base that has no trailing slash", async () => {
+    const fetchMock = stubFetch();
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/litert-community",
+    });
+    await p.load(fakeContext());
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      expect.anything()
+    );
+  });
 });
 
 describe("selectTextGenerationManifest", () => {
@@ -185,3 +458,67 @@ describe("selectTextGenerationManifest", () => {
     expect(lfm2_5InstructManifest.capabilities).not.toContain("reasoning");
   });
 });
+
+
+describe('LiteRtLmTextPipeline disposal boundaries', () => {
+  it('rejects loading a disposed instance', async () => {
+    const p = new LiteRtLmTextPipeline()
+    await p.dispose()
+    await expect(p.load(fakeContext())).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(mockEngineCreate).not.toHaveBeenCalled()
+  })
+
+  it('preserves cancellation when deleting a late engine fails', async () => {
+    const cleanupError = new Error('engine delete failed')
+    const engine = { delete: vi.fn().mockRejectedValue(cleanupError) }
+    let release!: () => void
+    mockEngineCreate.mockReturnValue(new Promise(resolve => { release = () => resolve(engine) }))
+    const p = new LiteRtLmTextPipeline()
+    const loading = p.load(fakeContext())
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, 'engine compile to start')
+    await p.dispose()
+    release()
+    await expect(loading).rejects.toMatchObject({ code: 'CANCELLED', cause: cleanupError })
+    expect(engine.delete).toHaveBeenCalledTimes(1)
+    expect(p.status).toBe('disposed')
+  })
+
+  it.each(['conversation', 'engine'])('finishes disposal even when %s cleanup rejects', async (failure) => {
+    const cleanupError = new Error('delete failed')
+    const conversation = {
+      sendMessage: vi.fn(), sendMessageStreaming: mockSendMessageStreaming, cancel: vi.fn(),
+      delete: failure === 'conversation' ? vi.fn().mockRejectedValue(cleanupError) : vi.fn().mockResolvedValue(undefined),
+    }
+    const engine = {
+      createConversation: vi.fn().mockResolvedValue(conversation),
+      delete: failure === 'engine' ? vi.fn().mockRejectedValue(cleanupError) : vi.fn().mockResolvedValue(undefined),
+    }
+    mockEngineCreate.mockResolvedValue(engine)
+    const p = new LiteRtLmTextPipeline()
+    await p.load(fakeContext())
+    await p.run({ messages: [{ role: 'user', content: 'hi' }] })
+    await expect(p.dispose()).rejects.toBe(cleanupError)
+    expect(conversation.delete).toHaveBeenCalledTimes(1)
+    expect(engine.delete).toHaveBeenCalledTimes(1)
+    expect(p.status).toBe('disposed')
+    expect(p).toHaveProperty('conversation', null)
+    expect(p).toHaveProperty('engine', null)
+    await expect(p.load(fakeContext())).rejects.toMatchObject({ code: 'CANCELLED' })
+  })
+})
+
+
+it('keeps text generation disposed when an in-flight stream finishes', async () => {
+  let finish!: () => void
+  mockSendMessageStreaming.mockReturnValue(new ReadableStream({
+    start(controller) { finish = () => controller.close() },
+  }))
+  const p = new LiteRtLmTextPipeline()
+  await p.load(fakeContext())
+  const running = p.run({ messages: [{ role: 'user', content: 'hi' }] })
+  await waitFor(() => mockSendMessageStreaming.mock.calls.length > 0, 'generation stream to start')
+  await p.dispose()
+  finish()
+  await running
+  expect(p.status).toBe('disposed')
+})

@@ -4,6 +4,7 @@ import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-p
 import {
   createModelLibraryAssetResolver,
   listStoredModels,
+  pruneSupersededModelCaches,
   registerModelAssets,
   removeStoredModel,
   type StoredModelInfo,
@@ -50,6 +51,10 @@ const CANDIDATES = [
   { id: 'doc-c', text: 'A quick castle develops the king and activates the rook.' },
 ]
 
+// Manifest asset paths are repo-relative, so the resolver base decides where weights
+// come from. This also decides the cache keys, so changing it orphans stored models.
+const MODEL_BASE = 'https://huggingface.co/'
+
 type AnyPipeline = LiteRtLmTextPipeline | ColBertPipeline | EncoderPipeline
 
 export function LfmPipelinePanel() {
@@ -67,10 +72,15 @@ export function LfmPipelinePanel() {
   const pipelineRef = useRef<AnyPipeline | null>(null)
   const ctxRef = useRef<ManagedLiteRtRuntimeContext | null>(null)
   const loadGenerationRef = useRef(0)
+  const loadAbortRef = useRef<AbortController | null>(null)
 
   const entry = MODELS.find(m => m.id === modelId) ?? MODELS[0]
 
   const disposePipeline = async () => {
+    // Abort first: a model download in flight must stop pulling bytes before the
+    // pipeline it belongs to is thrown away.
+    loadAbortRef.current?.abort()
+    loadAbortRef.current = null
     const pipeline = pipelineRef.current
     const ctx = ctxRef.current
     pipelineRef.current = null
@@ -95,10 +105,15 @@ export function LfmPipelinePanel() {
       if (generation !== loadGenerationRef.current) return
 
       registerModelAssets(m.manifest.modelId, m.manifest.assets.map((asset) => asset.path))
+      // No assetBase: the playground ships no public/wasm/ directory, so origin-relative
+      // resolution 404s. Omitting it selects the runtime's pinned @litertjs/core CDN
+      // fallback, which means the LiteRT WASM runtime is fetched from jsDelivr.
+      const loadAbort = new AbortController()
+      loadAbortRef.current = loadAbort
       ctx = await createLiteRtRuntime({
-        assetBase: '/',
-        assets: createModelLibraryAssetResolver('/'),
+        assets: createModelLibraryAssetResolver(MODEL_BASE),
         supportedBackends: { webgpu: true, wasm: true },
+        signal: loadAbort.signal,
       })
       if (generation !== loadGenerationRef.current) {
         ctx.liteRt.dispose()
@@ -107,7 +122,7 @@ export function LfmPipelinePanel() {
 
       ctxRef.current = ctx
       nextPipeline =
-        m.kind === 'text' ? new LiteRtLmTextPipeline(m.manifest)
+        m.kind === 'text' ? new LiteRtLmTextPipeline(m.manifest, { modelBase: MODEL_BASE })
         : m.kind === 'colbert' ? new ColBertPipeline({ manifest: m.manifest })
         : new EncoderPipeline({ manifest: m.manifest })
 
@@ -122,8 +137,9 @@ export function LfmPipelinePanel() {
       pipelineRef.current = nextPipeline
       setStatus('Ready')
       setProgress('')
-      const stored = await listStoredModels()
-      setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
+      await pruneSupersededModelCaches(m.manifest.modelId, MODEL_BASE)
+      const stored = await listStoredModels(MODEL_BASE)
+      setStoredInfo(m.kind === 'text' ? null : stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
     } catch (e: unknown) {
       if (generation !== loadGenerationRef.current) return
       if (nextPipeline) {
@@ -138,8 +154,8 @@ export function LfmPipelinePanel() {
 
   const refreshStoredInfo = useCallback(async (id: string) => {
     const m = MODELS.find((model) => model.id === id) ?? MODELS[0]
-    const stored = await listStoredModels()
-    setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
+    const stored = await listStoredModels(MODEL_BASE)
+    setStoredInfo(m.kind === 'text' ? null : stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
   }, [])
 
   useEffect(() => {
@@ -157,6 +173,7 @@ export function LfmPipelinePanel() {
     loadGenerationRef.current += 1
     void disposePipeline()
     setModelId(id)
+    setStoredInfo(null)
     setStatus('Not loaded')
     setError(null)
     setProgress('')
@@ -173,7 +190,7 @@ export function LfmPipelinePanel() {
     try {
       loadGenerationRef.current += 1
       await disposePipeline()
-      await removeStoredModel(entry.manifest.modelId)
+      await removeStoredModel(entry.manifest.modelId, MODEL_BASE)
       setStatus('Not loaded')
       setProgress('')
       setStoredInfo(null)
@@ -234,6 +251,11 @@ export function LfmPipelinePanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-sm text-on-surface-variant">Status: {status}</div>
+          {entry.kind === 'text' && (
+            <div className="mt-0.5 text-[11px] text-on-surface-variant">
+              Text weights stream on each load; not saved in the model library.
+            </div>
+          )}
           {storedInfo && (
             <div className="mt-0.5 text-[11px] text-on-surface-variant">
               Stored locally · {(storedInfo.bytes / 1e6).toFixed(1)} MB
