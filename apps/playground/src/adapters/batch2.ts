@@ -9,7 +9,7 @@ const U2NET_MEAN = [0.485, 0.456, 0.406]
 const U2NET_STD = [0.229, 0.224, 0.225]
 
 /** U-2-Net's reference preprocessing scales RGB by the image's own maximum before ImageNet normalization. */
-export function normalizeU2NetSaliencyImage(image: ImageData): Tensor {
+export function normalizeU2NetSaliencyPixels(image: ImageData): Float32Array {
   const { width, height, data: rgba } = image
   let max = 0
   for (let i = 0; i < rgba.length; i += 4) {
@@ -24,7 +24,7 @@ export function normalizeU2NetSaliencyImage(image: ImageData): Tensor {
     out[plane + p] = (rgba[base + 1] / divisor - U2NET_MEAN[1]) / U2NET_STD[1]
     out[2 * plane + p] = (rgba[base + 2] / divisor - U2NET_MEAN[2]) / U2NET_STD[2]
   }
-  return new Tensor(out, [1, 3, height, width])
+  return out
 }
 
 export const depth3Adapter: ModelAdapter = {
@@ -182,7 +182,7 @@ export const ormbgAdapter: ModelAdapter = {
     if (!img) throw new Error('Image data not provided')
     const [_, _c, H, W] = this.inputSpecs[0].shape
     const resized = resizeImageData(img, W, H)
-    return { input: normalizeU2NetSaliencyImage(resized) }
+    return { input: new Tensor(normalizeU2NetSaliencyPixels(resized), [1, 3, H, W]) }
   },
   parseOutputs(o: Record<string, Tensor>) {
     const [_, _c, H, W] = this.outputSpecs[0].shape
