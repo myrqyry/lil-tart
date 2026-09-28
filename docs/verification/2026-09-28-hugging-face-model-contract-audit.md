@@ -54,10 +54,10 @@ MoViNet-A0 Stream is also restricted to WASM in its package manifest and pipelin
 Backend policy is now explicit in receipts:
 
 - **selected backend** is what the user chose in the playground,
-- **runtime request** is the backend lil-tart actually passed to LiteRT after applying a verified model/graph constraint,
-- **resolved backend** is what LiteRT ultimately executed.
+- **main graph request/resolution** is labelled as main-graph-scoped rather than presented as the whole pipeline,
+- **graph backends** preserve the requested and resolved backend for every graph that actually ran.
 
-A correctness pin such as selected WebGPU → runtime request WASM → resolved WASM is **not** counted or described as a runtime fallback. Per-graph inference events also retain their own requested and resolved backends.
+For multi-graph adapters, the session proof renders each graph path independently instead of flattening Mimi, Matcha, PP-OCR, or other graph pipelines into one pretend-universal backend. Correctness pins are shown by graph name. Runtime fallbacks are aggregated once per graph so repeated inference calls cannot double-count a model's compile fallback. If a correctness override and a runtime fallback both happen, both are reported.
 
 ## Intentionally unavailable instead of fake-working
 
