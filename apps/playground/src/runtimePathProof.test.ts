@@ -37,7 +37,7 @@ describe('createRuntimePathProof', () => {
   it('refuses to manufacture proof without inference telemetry from this run', () => {
     const proof = createRuntimePathProof({
       adapter,
-      requestedBackend: 'auto',
+      selectedBackend: 'auto',
       modelInfo: null,
       telemetry: [event({ event: 'compile', inferenceDurationMs: undefined })],
       telemetryStart: 1,
@@ -51,7 +51,7 @@ describe('createRuntimePathProof', () => {
   it('captures the resolved runtime path without promoting durable verification', () => {
     const proof = createRuntimePathProof({
       adapter,
-      requestedBackend: 'auto',
+      selectedBackend: 'auto',
       modelInfo: {
         modelPath: 'models/tiny.tflite',
         requestedBackend: 'auto',
@@ -70,6 +70,7 @@ describe('createRuntimePathProof', () => {
 
     expect(proof).toMatchObject({
       modelId: 'tiny-model',
+      selectedBackend: 'auto',
       requestedBackend: 'auto',
       resolvedBackend: 'webgpu',
       compileDurationMs: 12,
@@ -83,10 +84,42 @@ describe('createRuntimePathProof', () => {
     expect(proof?.inferenceEvents).toHaveLength(1)
   })
 
+  it('records a correctness override as selection → runtime request → resolution, not as fallback', () => {
+    const proof = createRuntimePathProof({
+      adapter,
+      selectedBackend: 'webgpu',
+      modelInfo: {
+        modelPath: 'models/tiny.tflite',
+        requestedBackend: 'wasm',
+        resolvedBackend: 'wasm',
+        compileDurationMs: 10,
+        fallbackCount: 0,
+      },
+      telemetry: [
+        event({ requestedBackend: 'wasm', resolvedBackend: 'wasm', fallbackCount: 0 }),
+      ],
+      telemetryStart: 0,
+      outputCount: 1,
+      capturedAt: '2026-09-17T20:01:00.000Z',
+    })
+
+    expect(proof).toMatchObject({
+      selectedBackend: 'webgpu',
+      requestedBackend: 'wasm',
+      resolvedBackend: 'wasm',
+      fallbackCount: 0,
+    })
+    expect(proof?.inferenceEvents[0]).toMatchObject({
+      requestedBackend: 'wasm',
+      resolvedBackend: 'wasm',
+      fallbackCount: 0,
+    })
+  })
+
   it('preserves every graph event instead of flattening a multi-graph run', () => {
     const proof = createRuntimePathProof({
       adapter,
-      requestedBackend: 'auto',
+      selectedBackend: 'auto',
       modelInfo: null,
       telemetry: [
         event({ modelPath: 'models/encoder.tflite', resolvedBackend: 'webgpu', inferenceDurationMs: 8 }),
