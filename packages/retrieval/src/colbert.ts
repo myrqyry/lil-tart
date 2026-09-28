@@ -50,10 +50,8 @@ export class ColBertPipeline
   status: PipelineStatus = 'idle'
   onProgress?: (progress: PipelineProgress) => void
 
-  private context: RuntimeContext | null = null
   private model: CompiledModel | null = null
   private tokenizer: TransformersTokenizer | null = null
-  private loadMs = 0
 
   constructor(options: ColBertPipelineOptions = {}) {
     this.manifest = options.manifest ?? colbertManifest
@@ -62,8 +60,6 @@ export class ColBertPipeline
   async load(context: RuntimeContext): Promise<void> {
     if (this.status === 'ready') return
     this.status = 'loading'
-    this.context = context
-    const start = performance.now()
     try {
       this.report({ phase: 'loading-tokenizer', step: 1, total: 3 })
       const transformers = (await import('@huggingface/transformers')) as unknown as TransformersModule
@@ -74,7 +70,6 @@ export class ColBertPipeline
       const modelPath = this.manifest.assets[0].path
       this.model = (await context.liteRt.loadModel(modelPath)) as CompiledModel
       this.report({ phase: 'ready', step: 3, total: 3 })
-      this.loadMs = performance.now() - start
       this.status = 'ready'
     } catch (e) {
       this.status = 'error'
@@ -113,7 +108,6 @@ export class ColBertPipeline
   async dispose(): Promise<void> {
     this.model = null
     this.tokenizer = null
-    this.context = null
     this.status = 'disposed'
   }
 

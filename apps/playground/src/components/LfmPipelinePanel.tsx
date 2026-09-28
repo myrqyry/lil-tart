@@ -96,8 +96,7 @@ export function LfmPipelinePanel() {
 
       registerModelAssets(m.manifest.modelId, m.manifest.assets.map((asset) => asset.path))
       ctx = await createLiteRtRuntime({
-        assetBase: '/',
-        assets: createModelLibraryAssetResolver('/'),
+        assets: createModelLibraryAssetResolver('https://huggingface.co/'),
         supportedBackends: { webgpu: true, wasm: true },
       })
       if (generation !== loadGenerationRef.current) {
