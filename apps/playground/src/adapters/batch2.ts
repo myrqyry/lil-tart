@@ -1,10 +1,31 @@
 import type { ModelAdapter } from './types'
 import { Tensor } from '@litertjs/core'
 import { resizeImageData, normalizeAndFormatImageData, tensorToImageData } from '../imageUtils'
-import { loadClipTokenizer } from '../clipTokenizer'
 
 const s = (n: string, d: 'float32' | 'int32', sh: number[], desc: string) =>
   ({ name: n, dtype: d, shape: sh, description: desc })
+
+const U2NET_MEAN = [0.485, 0.456, 0.406]
+const U2NET_STD = [0.229, 0.224, 0.225]
+
+/** U-2-Net's reference preprocessing scales RGB by the image's own maximum before ImageNet normalization. */
+export function normalizeU2NetSaliencyImage(image: ImageData): Tensor {
+  const { width, height, data: rgba } = image
+  let max = 0
+  for (let i = 0; i < rgba.length; i += 4) {
+    max = Math.max(max, rgba[i], rgba[i + 1], rgba[i + 2])
+  }
+  const divisor = max || 1
+  const plane = width * height
+  const out = new Float32Array(3 * plane)
+  for (let p = 0; p < plane; p++) {
+    const base = p * 4
+    out[p] = (rgba[base] / divisor - U2NET_MEAN[0]) / U2NET_STD[0]
+    out[plane + p] = (rgba[base + 1] / divisor - U2NET_MEAN[1]) / U2NET_STD[1]
+    out[2 * plane + p] = (rgba[base + 2] / divisor - U2NET_MEAN[2]) / U2NET_STD[2]
+  }
+  return new Tensor(out, [1, 3, height, width])
+}
 
 export const depth3Adapter: ModelAdapter = {
   modelId: 'depth-anything-3',
@@ -64,10 +85,9 @@ export const rtmposeFaceAdapter: ModelAdapter = {
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const img = values['image'] as ImageData
     if (!img) throw new Error('Image data not provided')
-    const [_, C, H, W] = this.inputSpecs[0].shape
+    const [_, _c, H, W] = this.inputSpecs[0].shape
     const resized = resizeImageData(img, W, H)
-    const t = normalizeAndFormatImageData(resized, [1, C, H, W], { dataFormat: 'NCHW', colorOrder: 'RGB', normalization: 'imagenet' })
-    return { input: t }
+    return { input: normalizeU2NetSaliencyImage(resized) }
   },
   parseOutputs(o: Record<string, Tensor>) { return Promise.resolve({ simcc_x: o.simcc_x, simcc_y: o.simcc_y }) },
 }
@@ -159,7 +179,7 @@ export const ormbgAdapter: ModelAdapter = {
 export const u2netSalientAdapter: ModelAdapter = {
   modelId: 'u2net-salient',
   metadata: { name: 'U-2-Net — Saliency', description: 'Salient object detection (320×320)', modelPath: 'https://huggingface.co/litert-community/U-2-Net/resolve/main/u2net_fp16.tflite', tags: ['vision', 'segmentation'] },
-  inputSpecs: [s('input', 'float32', [1, 3, 320, 320], 'RGB ImageNet-norm NCHW')],
+  inputSpecs: [s('input', 'float32', [1, 3, 320, 320], 'RGB per-image-max scaling + ImageNet normalization, NCHW')],
   outputSpecs: [s('saliency', 'float32', [1, 1, 320, 320], 'Saliency mask [0,1]')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const img = values['image'] as ImageData
@@ -249,9 +269,10 @@ const CLIPSEG_BASE = 'https://huggingface.co/litert-community/CLIPSeg-rd64-LiteR
 
 export const clipsegAdapter: ModelAdapter = {
   modelId: 'clipseg',
-  metadata: { name: 'CLIPSeg — Text-Prompted Seg', description: 'Segment an image from a free-text prompt (text + vision encoders → decoder)', modelPath: `${CLIPSEG_BASE}/clipseg_text_fp16.tflite`, tags: ['vision', 'segmentation', 'text'] },
+  metadata: { name: 'CLIPSeg — Text-Prompted Seg', description: 'Requires host token-embedding lookup + text projection before the three LiteRT graphs; disabled until that full HF pipeline is implemented.', modelPath: `${CLIPSEG_BASE}/clipseg_text_fp16.tflite`, tags: ['vision', 'segmentation', 'text'] },
+  disabled: true,
   graphs: [
-    { name: 'vision', modelPath: `${CLIPSEG_BASE}/clipseg_vision_fp16.tflite` },
+    { name: 'vision', modelPath: `${CLIPSEG_BASE}/clipseg_vision_fp16.tflite`, requiredBackend: 'wasm' },
     { name: 'decoder', modelPath: `${CLIPSEG_BASE}/clipseg_decoder.tflite` },
   ],
   inputSpecs: [
@@ -262,22 +283,8 @@ export const clipsegAdapter: ModelAdapter = {
   prepareInputs(): Record<string, Tensor> {
     throw new Error('Image data not provided for clipseg')
   },
-  async run(values, ctx) {
-    const image = values['image'] as ImageData | undefined
-    if (!image) throw new Error('Image data not provided for clipseg')
-    const tokenizer = await loadClipTokenizer()
-    const ids = tokenizer.encode(String(values['text'] ?? ''), 77)
-    const textOut = await ctx.predict('main', { input: ctx.createTensor(Float32Array.from(ids), [1, 77]) })
-    const textEmb = Object.values(textOut)[0]
-
-    const resized = resizeImageData(image, 352, 352)
-    const visionTensor = normalizeAndFormatImageData(resized, [1, 3, 352, 352], { dataFormat: 'NCHW', colorOrder: 'RGB', normalization: '0-1' })
-    const visionOut = await ctx.predict('vision', { input: visionTensor })
-    const visionEmb = Object.values(visionOut)[0]
-
-    const decOut = await ctx.predict('decoder', { text_emb: textEmb, vision_emb: visionEmb })
-    const mask = await tensorToImageData(Object.values(decOut)[0], 352, 352)
-    return { mask }
+  async run() {
+    throw new Error('CLIPSeg is disabled until its verified host embedding/projection pipeline is implemented')
   },
   parseOutputs(o: Record<string, Tensor>) { return Promise.resolve(o) },
 }
