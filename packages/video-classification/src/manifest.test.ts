@@ -6,11 +6,11 @@ describe('MoViNet manifest', () => {
     expect(moViNetManifest.assets).toEqual([
       expect.objectContaining({ id: 'model', role: 'model' }),
     ]);
+    expect(moViNetManifest.backends).toEqual({ webgpu: false, wasm: true });
     expect(moViNetManifest.verification).toMatchObject({
       qualification: 'limited',
       upstreamRevision: 'c2ceda0efa7344ba5a95c3eeaa9925cb0940e453',
       environments: [
-        expect.objectContaining({ backend: 'webgpu' }),
         expect.objectContaining({ backend: 'wasm' }),
       ],
       expectedOutput: {
