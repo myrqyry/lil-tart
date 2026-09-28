@@ -182,8 +182,8 @@ export const mimiAdapter: ModelAdapter = {
     tags: ['audio', 'codec', 'mimi'],
   },
   graphs: [
-    { name: 'enc_tx', modelPath: `${MIMI_BASE}/mimi_enc_tx_fp16.tflite` },
-    { name: 'dec_tx', modelPath: `${MIMI_BASE}/mimi_dec_tx_fp16.tflite` },
+    { name: 'enc_tx', modelPath: `${MIMI_BASE}/mimi_enc_tx_fp16.tflite`, requiredBackend: 'wasm' },
+    { name: 'dec_tx', modelPath: `${MIMI_BASE}/mimi_dec_tx_fp16.tflite`, requiredBackend: 'wasm' },
     { name: 'deconly', modelPath: `${MIMI_BASE}/mimi_deconly_fp16.tflite` },
   ],
   inputSpecs: [
