@@ -96,24 +96,28 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
     const onExternalAbort = () => controller.abort()
     if (context.signal?.aborted) controller.abort()
     else context.signal?.addEventListener('abort', onExternalAbort, { once: true })
+    // Both cancellation routes have to be checked wherever a result would be published:
+    // disposal or a superseding load bumps loadToken, while a caller aborting
+    // context.signal only flips controller.signal.
+    const cancelled = () => token !== this.loadToken || controller.signal.aborted
     try {
       this.report({ phase: 'loading-tokenizer', step: 1, total: 3 })
       const transformers = (await import('@huggingface/transformers')) as unknown as TransformersModule
       // ponytail: repo id is the first two path segments of any asset URL
       const repoId = this.manifest.assets[0].path.split('/').slice(0, 2).join('/')
       this.tokenizer = await transformers.AutoTokenizer.from_pretrained(repoId)
-      // A dispose landing during the tokenizer fetch must not repopulate state.
+      // A cancellation landing during the tokenizer fetch must not repopulate state.
       // Reject rather than resolve: the caller asked for a model and did not get one.
-      if (token !== this.loadToken) {
-        throw new InferenceError('CANCELLED', 'Pipeline was disposed during load')
+      if (cancelled()) {
+        throw new InferenceError('CANCELLED', 'Model load was cancelled')
       }
       this.report({ phase: 'loading-model', step: 2, total: 3 })
       const modelPath = this.manifest.assets[0].path
       const model = (await context.liteRt.loadModel(modelPath, { signal: controller.signal })) as CompiledModel
-      // A dispose landing during the load must not resurrect the pipeline. The
+      // A cancellation landing during the load must not resurrect the pipeline. The
       // runtime still owns the compiled model and disposes it with itself.
-      if (token !== this.loadToken) {
-        throw new InferenceError('CANCELLED', 'Pipeline was disposed during load')
+      if (cancelled()) {
+        throw new InferenceError('CANCELLED', 'Model load was cancelled')
       }
       this.model = model
       this.report({ phase: 'ready', step: 3, total: 3 })

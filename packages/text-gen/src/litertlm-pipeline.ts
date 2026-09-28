@@ -262,6 +262,11 @@ export class LiteRtLmTextPipeline
     const onExternalAbort = () => controller.abort();
     if (context.signal?.aborted) controller.abort();
     else context.signal?.addEventListener('abort', onExternalAbort, { once: true });
+    // Cancellation arrives two ways, and both have to be checked at every point where a
+    // result would be published. Disposal or a superseding load bumps loadToken; a caller
+    // aborting context.signal only flips controller.signal, and it cannot stop a compile
+    // that is already under way, so the late result has to be recognised as cancelled.
+    const cancelled = () => token !== this.loadToken || controller.signal.aborted;
     try {
       this.report({ phase: 'loading', step: 1, total: 2 });
       const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
@@ -274,10 +279,8 @@ export class LiteRtLmTextPipeline
       // Do not start a multi-hundred-megabyte compile for a pipeline that was
       // disposed while the model was still arriving. Reject rather than resolve:
       // the caller asked for a model and did not get one.
-      if (token !== this.loadToken) {
-        throw new InferenceError('CANCELLED', 'Pipeline was disposed during model load', {
-          asset: modelPath,
-        });
+      if (cancelled()) {
+        throw new InferenceError('CANCELLED', 'Model load was cancelled', { asset: modelPath });
       }
       const backend = context.backend === 'webnn' ? undefined : context.backend;
       const engine = await module.Engine.create({
@@ -285,14 +288,12 @@ export class LiteRtLmTextPipeline
         backend,
         mainExecutorSettings: { maxNumTokens: DEFAULTS.maxContextTokens },
       });
-      // dispose() can land while the engine is still compiling, and aborting the
-      // fetch cannot stop that. The late result must be released, not published,
-      // or a disposed pipeline resurrects itself and leaks the engine.
-      if (token !== this.loadToken) {
+      // A dispose or a caller abort can land while the engine is still compiling, and
+      // aborting the fetch cannot stop that. The late result must be released, not
+      // published, or a cancelled pipeline resurrects itself and leaks the engine.
+      if (cancelled()) {
         await engine.delete();
-        throw new InferenceError('CANCELLED', 'Pipeline was disposed during model load', {
-          asset: modelPath,
-        });
+        throw new InferenceError('CANCELLED', 'Model load was cancelled', { asset: modelPath });
       }
       this.engine = engine;
       this.loadMs = performance.now() - loadStart;

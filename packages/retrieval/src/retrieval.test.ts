@@ -150,6 +150,8 @@ describe('ColBertPipeline cancellation', () => {
     const controller = new AbortController()
     const pipeline = new ColBertPipeline()
     const loading = pipeline.load({ ...ctx, signal: controller.signal } as never)
+    // Abort once the model load is genuinely in flight, not before it starts.
+    await waitFor(() => seen.signal !== null, 'loadModel to start')
     controller.abort()
 
     await expect(loading).rejects.toThrow()
@@ -165,8 +167,8 @@ describe('ColBertPipeline cancellation', () => {
 
     await expect(pipeline.load({ ...ctx, signal: controller.signal } as never)).rejects.toThrow()
     // addEventListener on a settled signal never fires, so this only passes if the
-    // already-aborted case is handled explicitly.
-    expect(seen.signal?.aborted).toBe(true)
+    // already-aborted case is handled explicitly. The model load is then never started.
+    expect(seen.signal).toBeNull()
   })
 
   it('does not resurrect a disposed pipeline when the model resolves late', async () => {
@@ -191,7 +193,7 @@ describe('ColBertPipeline cancellation', () => {
     await waitFor(() => seenLoad, 'loadModel to start')
     await pipeline.dispose()
     release()
-    await expect(loading).rejects.toThrow(/disposed/i)
+    await expect(loading).rejects.toThrow(/cancelled/i)
 
     expect(pipeline.status).toBe('disposed')
   })

@@ -249,7 +249,13 @@ half in a real browser; the engine half is not.
     resolving quietly, because the caller asked for a model and did not get one;
   - the `catch` reports `disposed` when disposal won the race, instead of stamping
     `idle` over an already disposed pipeline;
-  - a tokenizer fetch completing after disposal does not repopulate state.
+  - a tokenizer fetch completing after disposal does not repopulate state;
+  - **both** cancellation routes are checked at every publication point. Disposal
+    and a superseding load bump `loadToken`, but a caller aborting `context.signal`
+    only flips `controller.signal` — checking the token alone let a cancelled load
+    finish with a live engine and `status: 'ready'`, because a compile already under
+    way cannot be aborted. An already-cancelled pipeline is now also never started:
+    the model load is skipped entirely rather than started and cancelled.
   Awaiting the in-flight `load()` inside `dispose()` was considered and rejected:
   guarding the assignment sites makes correctness independent of ordering, and
   blocking `dispose()` on a multi-hundred-megabyte compile would be its own problem.

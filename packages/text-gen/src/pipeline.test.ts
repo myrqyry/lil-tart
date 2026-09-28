@@ -348,9 +348,39 @@ describe("LiteRtLmTextPipeline", () => {
     releaseEngine();
 
     // Rejects rather than resolving: the caller asked for a model and did not get one.
-    await expect(loading).rejects.toThrow(/disposed/i);
+    await expect(loading).rejects.toThrow(/cancelled/i);
     // Disposed stays disposed, and the late engine is released rather than kept.
     expect(p.status).toBe("disposed");
+  });
+
+  // The response body is consumed and the compile is under way when the caller cancels.
+  // Aborting cannot stop a compile, so the guard has to notice controller.signal
+  // rather than only the dispose token, or the cancelled load still ends up 'ready'.
+  it("discards an engine that completes after the caller aborts", async () => {
+    stubFetch();
+    const lateEngine = {
+      createConversation: vi.fn(),
+      delete: vi.fn(async () => undefined),
+    };
+    let releaseEngine = () => {};
+    mockEngineCreate.mockReturnValue(
+      new Promise<unknown>((resolve) => {
+        releaseEngine = () => resolve(lateEngine);
+      })
+    );
+
+    const controller = new AbortController();
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
+    const loading = p.load({ ...fakeContext(), signal: controller.signal });
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, "engine compile to start");
+    controller.abort();
+    releaseEngine();
+
+    await expect(loading).rejects.toThrow(/cancelled/i);
+    expect(lateEngine.delete).toHaveBeenCalledTimes(1);
+    expect(p.status).not.toBe("ready");
   });
 
   it("deletes an engine that resolves after disposal", async () => {
@@ -373,7 +403,7 @@ describe("LiteRtLmTextPipeline", () => {
     await waitFor(() => mockEngineCreate.mock.calls.length > 0, "engine compile to start");
     await p.dispose();
     releaseEngine();
-    await expect(loading).rejects.toThrow(/disposed/i);
+    await expect(loading).rejects.toThrow(/cancelled/i);
 
     expect(lateEngine.delete).toHaveBeenCalledTimes(1);
   });
