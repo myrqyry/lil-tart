@@ -64,6 +64,7 @@ export interface QualificationContext {
 export interface QualificationRuntime {
   initialize?(): Promise<void>
   runModuleWorkerLoader?(): Promise<QualificationObservation>
+  probeAbortStopsTransfer?(): Promise<QualificationObservation>
   loadAndCompile(
     model: Uint8Array,
     options: { accelerator: QualificationBackend },

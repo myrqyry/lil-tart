@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix`: make MoViNet frame commit transactional and correct WASM probes
 - `fix`: terminate TTS workers on failure and probe WASM features honestly
 
+### Verification
+- Add a `pipeline-load-cancellation` runtime qualification case that streams a real cross-origin asset through the shared asset resolver in headless Chromium and observes that an abort stops the transfer, closing the cancellation evidence gap that only stubbed `fetch` had covered. Durable record in `docs/verification/2026-09-28-model-load-cancellation.md`
+
 ### Docs
 - Canonical Git dependency examples now use the renamed `myrqyry/lil-tart` repository while preserving the stable `@litert-playground/*` package namespace.
 - `docs`: add root `AGENTS.md` and nested package guidance

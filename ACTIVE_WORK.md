@@ -167,8 +167,8 @@ decided, tested, and documented, so the remaining work is delivery:
 Established against the current tree, not inherited from earlier commits:
 
 - `pnpm verify` — exit code 0. All six stages green: typecheck, per-package
-  tests (retrieval 7/7, qwen3-tts 13 files, playground 12 files, …),
-  boundaries 13/13, compatibility 10/10 packages, qualification 19 files, build.
+  tests (inference-core 33, text-gen 22, encoder 11, retrieval 11, playground 141),
+  boundaries 15/15, compatibility 10/10 packages, qualification 20 files, build.
 - `@litert-playground/retrieval` compatibility row: `pass pass pass pass`
   (import, peers, typecheck, build) with the subpath import live.
 - **Mutation check.** Three deliberate regressions were introduced and reverted;
@@ -182,12 +182,26 @@ Established against the current tree, not inherited from earlier commits:
      sibling-path test failed, which is how the first guard's weakness was proven.
   5. Re-buffffering the model through `context.assets.resolve` in text-gen — five
      text-gen tests failed, including the one asserting the resolver is never called.
+  6. Letting the `catch` stamp `idle` over a disposed pipeline — the dispose tests failed.
+  7. Dropping the already-aborted signal check — the pre-aborted-signal tests failed.
+  8. Deleting the abort line the LFM cancellation guard protected — **the old
+     assertion passed it**, which is how that guard was proven unfalsifiable; the
+     fixed assertion fails.
+  9. Dropping the signal from the runtime resolver request in the browser probe —
+     the qualification case reported the full 25,165,824 bytes arriving.
   Each mutation was reverted and the suite re-confirmed green.
 
-Not established: browser runtime evidence. Nothing here was exercised in a real
-browser session, so no runtime or manual UI claim is being made. In particular the
-text-gen fix is verified at the type/API boundary and by unit tests, not by an
-actual generation run in a browser.
+Browser runtime evidence is now partially established. The `pipeline-load-cancellation`
+qualification case runs in headless Chromium and streams a real cross-origin asset
+through the shared resolver, observing that an abort stops the transfer well short of
+24 MiB and surfaces `CANCELLED`. Dropping the signal reproduces the defect exactly
+(full 25,165,824 of 25,165,824 bytes), so the case is falsifiable rather than
+decorative. Record: `docs/verification/2026-09-28-model-load-cancellation.md`.
+
+Still not established: `Engine.create` consuming a streamed body, which needs a real
+`.litertlm` checkpoint, and any actual text generation in a browser. The text-gen
+change is verified at the type/API boundary, by unit tests, and now for the transfer
+half in a real browser; the engine half is not.
 
 ## Open uncertainty
 

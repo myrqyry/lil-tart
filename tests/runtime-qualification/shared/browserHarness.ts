@@ -15,7 +15,11 @@ import type { ModelAssetDescriptor } from '../schema/types'
 import { captureBrowserEnvironment } from './environment'
 import { runQualificationMatrix } from './matrix'
 import { createServer, type ViteDevServer } from 'vite'
+import { createReadStream, statSync } from 'node:fs'
+import { createServer as createNodeServer } from 'node:http'
+import { join } from 'node:path'
 import { createQualificationTypedArray, serializeQualificationInput } from './tensorBridge'
+import { ABORT_PROBE_PATH } from '../pipeline-load-cancellation/probeAsset.meta'
 
 interface BrowserRuntimeApi {
   initialize(path: string): Promise<void>
@@ -44,6 +48,11 @@ interface BrowserRuntimeApi {
   run(id: number, request: ReturnType<typeof serializeQualificationInput>): Promise<BrowserSerializedOutput>
   delete(id: number): void
   runQwenGenerator(request: QwenGeneratorRequest): Promise<QwenGeneratorRunResult>
+  probeAbortStopsTransfer(origin: string): Promise<{
+    status: 'pass' | 'fail'
+    stage?: string
+    error?: { message: string }
+  }>
 }
 
 interface BrowserSerializedTensor {
@@ -148,6 +157,8 @@ function createPlaywrightLauncher(): BrowserLauncher {
   return async (options, run) => {
     const playwright = await import('playwright')
     const server = await createQualificationServer()
+  const probeAsset = join(process.cwd(), ABORT_PROBE_PATH)
+  const probeServer = await createProbeAssetServer(probeAsset)
     const browserType = playwright[options.browserName]
     const browser = await browserType.launch({ headless: options.headless })
     const context = await browser.newContext()
@@ -224,6 +235,7 @@ function createPlaywrightLauncher(): BrowserLauncher {
       const runtime = {
         initialize: () => page.evaluate((path) => window.litertQualification.initialize(path), '/node_modules/@litertjs/core/wasm'),
         runModuleWorkerLoader: () => page.evaluate(() => window.litertQualification.runModuleWorkerLoader()),
+        probeAbortStopsTransfer: () => page.evaluate((origin) => window.litertQualification.probeAbortStopsTransfer(origin), probeServer.origin),
         loadAndCompile: async (model: Uint8Array, compileOptions: { accelerator: QualificationBackend }) => {
           const result = await page.evaluate(async ({ model, accelerator }) => window.litertQualification.loadAndCompile(model, accelerator), {
               model: Array.from(model),
@@ -255,6 +267,7 @@ function createPlaywrightLauncher(): BrowserLauncher {
       await context.close()
       await browser.close()
       await server.close()
+      await probeServer.close()
     }
   }
 }
@@ -263,4 +276,34 @@ async function createQualificationServer(): Promise<ViteDevServer> {
   const server = await createServer({ root: process.cwd(), server: { port: 0 } })
   await server.listen()
   return server
+}
+
+// A separate origin for the abort probe, on purpose: the real model base is a different
+// origin from the app (Hugging Face), so cancellation has to hold cross-origin. Served
+// from its own port rather than the Vite dev server, which does not expose arbitrary
+// files from the project root.
+function createProbeAssetServer(file: string): Promise<{ origin: string; close(): Promise<void> }> {
+  const server = createNodeServer((req, res) => {
+    if (!req.url?.startsWith('/asset')) {
+      res.statusCode = 404
+      res.end()
+      return
+    }
+    // Cross-origin on purpose, matching a real model base, so the browser applies CORS
+    // exactly as it would against Hugging Face.
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Content-Type', 'application/octet-stream')
+    res.setHeader('Content-Length', String(statSync(file).size))
+    createReadStream(file).pipe(res)
+  })
+  return new Promise((resolvePromise) => {
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      const port = typeof address === 'object' && address ? address.port : 0
+      resolvePromise({
+        origin: `http://127.0.0.1:${port}`,
+        close: () => new Promise<void>((done) => server.close(() => done())),
+      })
+    })
+  })
 }

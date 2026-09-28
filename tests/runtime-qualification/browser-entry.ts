@@ -1,5 +1,7 @@
 import { loadAndCompile, loadLiteRt, setWebGpuDevice, Tensor } from '@litertjs/core'
 import { createLiteRtRuntime } from '../../packages/runtime-litert/src/context'
+import { createHttpAssetResolver } from '../../packages/inference-core/src/assets/http-resolver'
+import { ABORT_PROBE_BYTES } from './pipeline-load-cancellation/probeAsset.meta'
 import { GeneratorPhase } from '../../packages/qwen3-tts/src/phases/generator'
 import {
   createQualificationTypedArray,
@@ -63,6 +65,57 @@ Object.assign(window, {
       const buffer = await response.arrayBuffer()
       const verified = await verifyQualificationAsset(buffer, descriptor)
       return Array.from(new Uint8Array(verified))
+    },
+    // Streams a real local asset through the shared resolver, aborts after the first
+    // chunk, and reports what actually happened. The engine cannot be cancelled once
+    // it starts compiling, so the transfer is the only place cancellation can be proven.
+    async probeAbortStopsTransfer(origin: string) {
+      const url = new URL('/asset', origin)
+      const resolver = createHttpAssetResolver(url.origin)
+      const controller = new AbortController()
+      const asset = { id: 'abort-probe.bin', path: url.pathname.replace(/^\//, '') }
+      if (!resolver.stream) {
+        return { status: 'fail' as const, stage: 'probe', error: { message: 'resolver cannot stream' } }
+      }
+      const stream = await resolver.stream(asset, { signal: controller.signal })
+      const reader = stream.getReader()
+      const first = await reader.read()
+      if (first.done || !first.value) {
+        return {
+          status: 'fail' as const,
+          stage: 'probe',
+          error: { message: 'asset completed before any abort could be observed' },
+        }
+      }
+      const bytesAtAbort = first.value.byteLength
+      controller.abort()
+
+      let bytesAfterAbort = bytesAtAbort
+      let cancellationCode: string | null = null
+      try {
+        for (;;) {
+          const next = await reader.read()
+          if (next.done) break
+          bytesAfterAbort += next.value?.byteLength ?? 0
+        }
+      } catch (error) {
+        const code = (error as { code?: string }).code
+        cancellationCode = typeof code === 'string' ? code : 'uncoded'
+      }
+
+      const transferStopped = bytesAfterAbort < ABORT_PROBE_BYTES
+      if (!transferStopped || cancellationCode !== 'CANCELLED') {
+        return {
+          status: 'fail' as const,
+          stage: 'probe',
+          error: {
+            message:
+              `abort did not stop the transfer: ${bytesAfterAbort} of ${ABORT_PROBE_BYTES} bytes, ` +
+              `cancellation code ${String(cancellationCode)}`,
+          },
+        }
+      }
+      return { status: 'pass' as const }
     },
     runModuleWorkerLoader() {
       const worker = new Worker(

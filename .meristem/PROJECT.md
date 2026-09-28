@@ -105,6 +105,12 @@ Distinguish evidence classes rather than collapsing them:
 Only claim the level actually established. A commit that once passed verify on
 an earlier branch is not evidence about the current tree.
 
+Browser observations are a separate, recorded evidence class. They live in
+`docs/verification/` as durable records, because the raw results JSON under
+`tests/runtime-qualification/results/` is gitignored. Run one with
+`pnpm qualify -- --case <id>`. A new browser case is only worth trusting once it
+has been shown to fail for the right reason.
+
 ## Open structural uncertainty
 
 - The supported packed surface in `docs/package-revision-policy.md` enumerates

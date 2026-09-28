@@ -7,6 +7,8 @@ import { qwenBrowserMemoryGeneratorCase } from './qwen-browsermemory-generator/c
 import { runBrowserQualification } from './shared/browserHarness'
 import type { QualificationBackend, QualificationResult, QualificationSelection } from './schema/types'
 import { tinyLitertBaselineCase } from './tiny-litert-baseline/case'
+import { pipelineLoadCancellationCase } from './pipeline-load-cancellation/case'
+import { ensureAbortProbeAsset } from './pipeline-load-cancellation/probeAsset'
 
 export interface QualificationCliOptions {
   caseIds?: string[]
@@ -15,8 +17,11 @@ export interface QualificationCliOptions {
   headed: boolean
 }
 
+ensureAbortProbeAsset()
+
 const cases = [
   tinyLitertBaselineCase,
+  pipelineLoadCancellationCase,
   efficientDetDynamicOutputCase,
   qwenOmniMtpStandaloneCase,
   qwenBrowserMemoryGeneratorCase,
