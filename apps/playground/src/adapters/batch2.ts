@@ -85,9 +85,10 @@ export const rtmposeFaceAdapter: ModelAdapter = {
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const img = values['image'] as ImageData
     if (!img) throw new Error('Image data not provided')
-    const [_, _c, H, W] = this.inputSpecs[0].shape
+    const [_, C, H, W] = this.inputSpecs[0].shape
     const resized = resizeImageData(img, W, H)
-    return { input: normalizeU2NetSaliencyImage(resized) }
+    const t = normalizeAndFormatImageData(resized, [1, C, H, W], { dataFormat: 'NCHW', colorOrder: 'RGB', normalization: 'imagenet' })
+    return { input: t }
   },
   parseOutputs(o: Record<string, Tensor>) { return Promise.resolve({ simcc_x: o.simcc_x, simcc_y: o.simcc_y }) },
 }
@@ -171,12 +172,7 @@ export const ormbgAdapter: ModelAdapter = {
     return { input: t }
   },
   parseOutputs(o: Record<string, Tensor>) {
-    const [_, _c, _h, W] = this.outputSpecs[0].shape
-    return tensorToImageData(o.alpha, W, _h).then(d => ({ alpha: d }))
-  },
-}
-
-export const u2netSalientAdapter: ModelAdapter = {
+    const [_, _c, _h, W] = this.oexport const u2netSalientAdapter: ModelAdapter = {
   modelId: 'u2net-salient',
   metadata: { name: 'U-2-Net — Saliency', description: 'Salient object detection (320×320)', modelPath: 'https://huggingface.co/litert-community/U-2-Net/resolve/main/u2net_fp16.tflite', tags: ['vision', 'segmentation'] },
   inputSpecs: [s('input', 'float32', [1, 3, 320, 320], 'RGB per-image-max scaling + ImageNet normalization, NCHW')],
@@ -184,13 +180,17 @@ export const u2netSalientAdapter: ModelAdapter = {
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const img = values['image'] as ImageData
     if (!img) throw new Error('Image data not provided')
-    const [_, C, H, W] = this.inputSpecs[0].shape
+    const [_, _c, H, W] = this.inputSpecs[0].shape
     const resized = resizeImageData(img, W, H)
-    const t = normalizeAndFormatImageData(resized, [1, C, H, W], { dataFormat: 'NCHW', colorOrder: 'RGB', normalization: 'imagenet' })
-    return { input: t }
+    return { input: normalizeU2NetSaliencyImage(resized) }
   },
   parseOutputs(o: Record<string, Tensor>) {
     const [_, _c, H, W] = this.outputSpecs[0].shape
+    return tensorToImageData(o.saliency, W, H).then(d => ({ saliency: d }))
+  },
+}
+
+Specs[0].shape
     return tensorToImageData(o.saliency, W, H).then(d => ({ saliency: d }))
   },
 }
