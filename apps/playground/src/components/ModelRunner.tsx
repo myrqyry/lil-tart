@@ -225,13 +225,13 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
 
 
   return (
-    <div className="min-h-screen bg-surface-dim">
+    <div className="app-shell min-h-screen bg-surface-dim">
       <div
-        className="mx-auto grid w-full gap-3 px-3 py-3 md:px-4 lg:grid-cols-[26rem_minmax(0,1fr)] xl:px-5"
+        className="workspace-grid mx-auto grid w-full gap-4 px-3 py-3 md:px-4 lg:grid-cols-[26rem_minmax(0,1fr)] xl:px-5"
         style={{ maxWidth: 1800 }}
       >
-        <aside className="lg:sticky lg:top-3 lg:flex lg:h-[calc(100vh-1.5rem)] lg:min-h-0 lg:flex-col">
-          <section className="rounded-2xl border border-outline/35 bg-surface-container-low/95 p-3 shadow-xl shadow-black/10">
+        <aside className="workspace-sidebar lg:sticky lg:top-3 lg:flex lg:h-[calc(100vh-1.5rem)] lg:min-h-0 lg:flex-col">
+          <section className="neo-pod tart-pod p-4">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Local model workshop</p>
@@ -241,7 +241,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                 </p>
               </div>
               {(storedModels.length > 0 || orphanedModels.length > 0) && (
-                <div className="rounded-lg bg-surface-container px-2 py-1 text-right text-[11px] text-on-surface-variant">
+                <div className="neo-badge px-3 py-1.5 text-right text-[11px] text-on-surface-variant">
                   <p className="font-semibold text-on-surface">{storedModels.length} local</p>
                   <p>{formatBytes(storedBytes)}</p>
                 </div>
@@ -255,8 +255,8 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
             />
           </section>
 
-          <section className="mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-outline/35 bg-surface-container-low/95 shadow-xl shadow-black/10">
-            <div className="border-b border-outline-variant/70 px-3 py-2.5">
+          <section className="neo-pod inference-pod mt-4 flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="pod-header px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-muted">Inference lab</p>
               <div className="mt-0.5 flex items-center justify-between gap-2">
                 <h2 className="text-[15px] font-semibold text-on-surface">
@@ -279,18 +279,18 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1">
                       {selectedAdapter.metadata.tags.map((tag) => (
-                        <span key={tag} className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-[11px] text-on-surface-variant">
+                        <span key={tag} className="tag-chip px-2 py-1 text-[11px] text-on-surface-variant">
                           {tag}
                         </span>
                       ))}
                       {selectedAdapter.verification?.status && (
-                        <span className="rounded-md bg-tertiary-container/70 px-1.5 py-0.5 text-[11px] text-on-tertiary-container">
+                        <span className="tag-chip tag-chip--verified px-2 py-1 text-[11px] text-on-tertiary-container">
                           {selectedAdapter.verification.status.replace(/-/g, ' ')}
                         </span>
                       )}
                     </div>
 
-                    <details className="mt-2 rounded-lg border border-outline-variant/70 bg-surface/35 px-2.5 py-2 text-xs text-on-surface-variant">
+                    <details className="neo-well mt-2 px-3 py-2.5 text-xs text-on-surface-variant">
                       <summary className="cursor-pointer select-none font-medium text-on-surface">Model details</summary>
                       <div className="mt-2 space-y-2">
                         <div>
@@ -315,7 +315,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                     <select
                       value={accelerator}
                       onChange={e => handleAcceleratorChange(e.target.value as Accelerator)}
-                      className="mt-2 w-full rounded-lg border border-outline-variant bg-surface-container-high px-2.5 py-2 text-sm text-on-surface"
+                      className="neo-select mt-2 w-full px-3 py-2.5 text-sm text-on-surface"
                     >
                       {ACCEL_OPTIONS.map(o => (
                         <option key={o.value} value={o.value}>{o.label}</option>
@@ -323,7 +323,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                     </select>
 
                     {activeBackendOverrides.length > 0 && (
-                      <div className="mt-2 rounded-lg border border-tertiary/30 bg-tertiary-container/25 p-2 text-xs text-on-tertiary-container">
+                      <div className="neo-alert mt-2 p-2.5 text-xs text-on-tertiary-container">
                         <p className="font-semibold">Correctness override</p>
                         <p className="mt-1 leading-snug">
                           {activeBackendOverrides
@@ -355,7 +355,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                           </span>
                         </div>
 
-                        <div className="space-y-3 rounded-xl border border-outline-variant/70 bg-surface/35 p-2.5">
+                        <div className="neo-well space-y-3 p-3">
                           {selectedAdapter.inputSpecs.some(isVisionSpec) && (
                             <ImageInput specs={selectedAdapter.inputSpecs} onChange={mergeInput} />
                           )}
@@ -372,7 +372,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                           <button
                             onClick={() => void runInference(inputValues)}
                             disabled={loading}
-                            className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary shadow-md transition-all duration-300 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:shadow-none"
+                            className="expressive-primary-button inline-flex w-full items-center justify-center px-4 py-3 text-sm font-semibold text-on-primary disabled:opacity-50"
                             style={{ transitionTimingFunction: 'var(--ease-spring)' }}
                           >
                             {operation === 'inference'
@@ -383,7 +383,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                           </button>
                         </div>
 
-                        <div className="mt-2 min-w-0 rounded-xl border border-outline-variant/70 bg-surface/35 p-2.5">
+                        <div className="neo-well mt-2 min-w-0 p-3">
                           <OutputViewer outputs={outputs} outputTensors={outputTensors} outputSpecs={outputSpecs} />
                         </div>
                       </section>
@@ -400,13 +400,13 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                           type="button"
                           onClick={() => void preflightModel()}
                           disabled={loading}
-                          className="rounded-lg border border-outline px-2.5 py-1.5 text-xs font-semibold text-on-surface transition-colors hover:bg-surface-container-high disabled:opacity-50"
+                          className="expressive-secondary-button px-3 py-2 text-xs font-semibold text-on-surface disabled:opacity-50"
                         >
                           {operation === 'preflight' ? 'Checking…' : 'Preflight'}
                         </button>
                       </div>
 
-                      <div className="mt-2 rounded-lg border border-outline-variant/60 bg-surface/40 p-2.5">
+                      <div className="neo-well mt-2 p-3">
                         <p className="text-[11px] uppercase tracking-wide text-on-surface-muted">Main graph</p>
                         <p className="mt-1 text-[13px] font-semibold text-on-surface">
                           {(modelInfo?.requestedBackend ?? accelerator).toUpperCase()} → {(resolvedAccelerator ?? 'unknown').toUpperCase()}
@@ -432,7 +432,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                       </div>
 
                       {runtimePathProof && (
-                        <div className="mt-2 rounded-lg border border-primary/30 bg-primary/5 p-2.5">
+                        <div className="neo-proof mt-2 p-3">
                           <div className="flex items-center justify-between gap-2">
                             <div>
                               <p className="text-xs font-semibold text-on-surface">Session proof</p>
@@ -461,7 +461,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                       )}
 
                       {recentTelemetry.length > 0 && (
-                        <details className="mt-2 rounded-lg border border-outline-variant/60 bg-surface/30 px-2.5 py-2 text-xs">
+                        <details className="neo-well mt-2 px-3 py-2.5 text-xs">
                           <summary className="cursor-pointer select-none font-medium text-on-surface">Recent runtime events</summary>
                           <div className="mt-2 space-y-1 font-mono text-[10px] text-on-surface-variant">
                             {recentTelemetry.map((entry, index) => (
@@ -494,13 +494,13 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                         onChange={e => setModelBaseInput(e.target.value)}
                         onBlur={commitModelBase}
                         onKeyDown={e => { if (e.key === 'Enter') commitModelBase() }}
-                        className="mt-1 w-full rounded-lg border border-outline-variant bg-surface px-2 py-1.5 text-xs text-on-surface focus:border-primary focus:outline-none"
+                        className="neo-input mt-1 w-full px-3 py-2 text-xs text-on-surface focus:outline-none"
                       />
                     </div>
                   </details>
                 </>
               ) : (
-                <div className="rounded-xl border border-dashed border-outline-variant p-4 text-center">
+                <div className="neo-empty-state p-5 text-center">
                   <p className="text-sm font-semibold text-on-surface">Pick a model from the library.</p>
                   <p className="mt-1 text-xs leading-relaxed text-on-surface-variant">
                     Its description, backend constraints, preflight tools, and runtime proof will live here.
@@ -511,8 +511,8 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           </section>
         </aside>
 
-        <main className="min-w-0">
-          <header className="mb-3 flex flex-wrap items-end justify-between gap-3 rounded-2xl border border-outline/30 bg-surface-container-low/70 px-3 py-3">
+        <main className="model-library min-w-0">
+          <header className="neo-pod library-pod mb-4 flex flex-wrap items-end justify-between gap-3 px-4 py-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-muted">Model library</p>
               <h2 className="mt-0.5 text-xl font-semibold text-on-surface">Choose what to run</h2>
@@ -553,7 +553,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
             placeholder="Search name, task, or model id…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            className="mb-2 w-full rounded-xl border border-outline-variant bg-surface-container-low px-3 py-2 text-[15px] text-on-surface placeholder:text-on-surface-muted transition-colors focus:border-primary focus:bg-surface-container focus:ring-2 focus:ring-primary/20 focus:outline-none"
+            className="neo-search mb-3 w-full px-4 py-3 text-[15px] text-on-surface placeholder:text-on-surface-muted focus:outline-none"
           />
 
           <ModelList
@@ -574,7 +574,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           />
 
           {selectedAdapter && downloadingId === selectedAdapter.modelId && operation === 'model-load' && (
-            <div className="mt-3 rounded-xl border border-outline-variant bg-surface-container-low p-3">
+            <div className="neo-pod mt-3 p-4">
               <div className="flex items-center justify-between gap-2 text-xs text-on-surface-variant">
                 <span>Loading {selectedAdapter.metadata.name}</span>
                 {downloadProgress?.totalBytes && <span>{progressPercent(downloadProgress)}%</span>}
