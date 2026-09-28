@@ -217,7 +217,7 @@ export const modnetAdapter: ModelAdapter = {
 export const yolo26SegAdapter: ModelAdapter = {
   modelId: 'yolo26-seg',
   metadata: { name: 'YOLO26m Segmentation', description: 'EdgeFirst YOLO26 segmentation INT8', modelPath: '/models/yolo26-seg/yolo26m-seg-int8-smart.tflite', tags: ['vision', 'segmentation'] },
-  disabled: true, // ponytail: no HF LiteRT mirror — needs locating (see /needs-locating)
+  disabled: true, // HF int8 export now exists, but its uint8 input + split int8 outputs do not match this placeholder contract.
   inputSpecs: [s('input', 'float32', [1, 640, 640, 3], 'RGB NHWC')],
   outputSpecs: [s('output', 'float32', [1, 116, 8400], 'Detection + mask coeffs')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
@@ -234,7 +234,7 @@ export const yolo26SegAdapter: ModelAdapter = {
 export const yolo11SegAdapter: ModelAdapter = {
   modelId: 'yolo11-seg',
   metadata: { name: 'YOLO11m Segmentation', description: 'EdgeFirst YOLO11 segmentation INT8', modelPath: '/models/yolo11-seg/yolo11m-seg-int8-smart.tflite', tags: ['vision', 'segmentation'] },
-  disabled: true, // ponytail: no HF LiteRT mirror — needs locating
+  disabled: true, // HF int8 export now exists, but its uint8 input + split int8 outputs do not match this placeholder contract.
   inputSpecs: [s('input', 'float32', [1, 640, 640, 3], 'RGB NHWC')],
   outputSpecs: [s('output', 'float32', [1, 116, 8400], 'Detection + mask coeffs')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
