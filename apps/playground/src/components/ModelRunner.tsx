@@ -285,7 +285,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                       ))}
                       {selectedAdapter.verification?.status && (
                         <span className="rounded-md bg-tertiary-container/70 px-1.5 py-0.5 text-[11px] text-on-tertiary-container">
-                          {selectedAdapter.verification.status.replaceAll('-', ' ')}
+                          {selectedAdapter.verification.status.replace(/-/g, ' ')}
                         </span>
                       )}
                     </div>
