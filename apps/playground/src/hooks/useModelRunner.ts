@@ -299,7 +299,7 @@ export function useModelRunner(): UseModelRunnerReturn {
       const runtimeState = refreshRuntimeState(runtime, adapter, accelerator)
       setRuntimePathProof(createRuntimePathProof({
         adapter,
-        requestedBackend: accelerator,
+        selectedBackend: accelerator,
         modelInfo: runtimeState.info,
         telemetry: runtimeState.telemetry,
         telemetryStart,
