@@ -227,7 +227,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   return (
     <div className="min-h-screen bg-surface-dim">
       <div
-        className="mx-auto grid w-full gap-3 px-3 py-3 md:px-4 lg:grid-cols-[21rem_minmax(0,1fr)] xl:px-5"
+        className="mx-auto grid w-full gap-3 px-3 py-3 md:px-4 lg:grid-cols-[26rem_minmax(0,1fr)] xl:px-5"
         style={{ maxWidth: 1800 }}
       >
         <aside className="lg:sticky lg:top-3 lg:flex lg:h-[calc(100vh-1.5rem)] lg:min-h-0 lg:flex-col">
@@ -341,6 +341,53 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   )}
 
                   {selectedLoaded ? (
+                    <>
+                      <section className="border-t border-outline-variant/60 pt-3">
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-on-surface-muted">Inference workspace</p>
+                            <p className="mt-0.5 text-[11px] text-on-surface-variant">
+                              Real inputs and outputs live here under Lil Tart.
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
+                            {activeBackendOverrides.length > 0 ? 'mixed' : (resolvedAccelerator ?? accelerator).toUpperCase()}
+                          </span>
+                        </div>
+
+                        <div className="space-y-3 rounded-xl border border-outline-variant/70 bg-surface/35 p-2.5">
+                          {selectedAdapter.inputSpecs.some(isVisionSpec) && (
+                            <ImageInput specs={selectedAdapter.inputSpecs} onChange={mergeInput} />
+                          )}
+                          {selectedAdapter.inputSpecs.some(isAudioSpec) && (
+                            <AudioInput specs={selectedAdapter.inputSpecs} onChange={mergeInput} />
+                          )}
+                          {selectedAdapter.inputSpecs.some(spec => !isVisionSpec(spec) && !isAudioSpec(spec)) && (
+                            <InputEditor
+                              specs={selectedAdapter.inputSpecs.filter(spec => !isVisionSpec(spec) && !isAudioSpec(spec))}
+                              onChange={mergeInput}
+                            />
+                          )}
+
+                          <button
+                            onClick={() => void runInference(inputValues)}
+                            disabled={loading}
+                            className="inline-flex w-full items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary shadow-md transition-all duration-300 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:shadow-none"
+                            style={{ transitionTimingFunction: 'var(--ease-spring)' }}
+                          >
+                            {operation === 'inference'
+                              ? 'Running inference…'
+                              : activeBackendOverrides.length > 0
+                                ? 'Run Inference · mixed backends'
+                                : 'Run Inference · ' + (resolvedAccelerator ?? accelerator).toUpperCase()}
+                          </button>
+                        </div>
+
+                        <div className="mt-2 min-w-0 rounded-xl border border-outline-variant/70 bg-surface/35 p-2.5">
+                          <OutputViewer outputs={outputs} outputTensors={outputTensors} outputSpecs={outputSpecs} />
+                        </div>
+                      </section>
+
                     <section className="border-t border-outline-variant/60 pt-3">
                       <div className="flex items-center justify-between gap-2">
                         <div>
@@ -427,6 +474,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                         </details>
                       )}
                     </section>
+                    </>
                   ) : (
                     <div className="rounded-lg border border-dashed border-outline-variant p-3 text-xs leading-relaxed text-on-surface-variant">
                       Download and load this model from its card to unlock preflight, inference, and runtime receipts.
@@ -548,60 +596,6 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
             </div>
           )}
 
-          {selectedAdapter && selectedLoaded && (
-            <section className="mt-4 rounded-2xl border border-outline/35 bg-surface-container-low/70 p-3">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-muted">Inference workspace</p>
-                  <h2 className="mt-0.5 text-lg font-semibold text-on-surface">{selectedAdapter.metadata.name}</h2>
-                </div>
-                <span className="rounded-full bg-surface-container-high px-2 py-1 text-xs text-on-surface-variant">
-                  {activeBackendOverrides.length > 0 ? 'mixed backends' : (resolvedAccelerator ?? accelerator).toUpperCase()}
-                </span>
-              </div>
-
-              <div className="grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-                <div className="rounded-xl border border-outline-variant/70 bg-surface/35 p-3">
-                  <div className="mb-3">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-on-surface-muted">Test input</p>
-                    <p className="mt-1 text-xs text-on-surface-variant">Feed the loaded model real input; the rail will capture its runtime path.</p>
-                  </div>
-
-                  <div className="space-y-3">
-                    {selectedAdapter.inputSpecs.some(isVisionSpec) && (
-                      <ImageInput specs={selectedAdapter.inputSpecs} onChange={mergeInput} />
-                    )}
-                    {selectedAdapter.inputSpecs.some(isAudioSpec) && (
-                      <AudioInput specs={selectedAdapter.inputSpecs} onChange={mergeInput} />
-                    )}
-                    {selectedAdapter.inputSpecs.some(spec => !isVisionSpec(spec) && !isAudioSpec(spec)) && (
-                      <InputEditor
-                        specs={selectedAdapter.inputSpecs.filter(spec => !isVisionSpec(spec) && !isAudioSpec(spec))}
-                        onChange={mergeInput}
-                      />
-                    )}
-                  </div>
-
-                  <button
-                    onClick={() => void runInference(inputValues)}
-                    disabled={loading}
-                    className="mt-3 inline-flex w-full items-center justify-center rounded-xl bg-primary px-5 py-2.5 text-sm font-semibold text-on-primary shadow-md transition-all duration-300 hover:scale-[1.01] hover:shadow-lg active:scale-[0.99] disabled:opacity-50 disabled:shadow-none"
-                    style={{ transitionTimingFunction: 'var(--ease-spring)' }}
-                  >
-                    {operation === 'inference'
-                      ? 'Running inference…'
-                      : activeBackendOverrides.length > 0
-                        ? 'Run Inference · mixed backends'
-                        : 'Run Inference · ' + (resolvedAccelerator ?? accelerator).toUpperCase()}
-                  </button>
-                </div>
-
-                <div className="min-w-0 rounded-xl border border-outline-variant/70 bg-surface/35 p-3">
-                  <OutputViewer outputs={outputs} outputTensors={outputTensors} outputSpecs={outputSpecs} />
-                </div>
-              </div>
-            </section>
-          )}
         </main>
       </div>
     </div>
