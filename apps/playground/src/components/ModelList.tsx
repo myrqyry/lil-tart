@@ -331,7 +331,7 @@ export default function ModelList({
               <button
                 type="button"
                 onClick={() => onSelect(adapter)}
-                className="block w-full flex-1 px-2.5 pb-2.5 pt-7 text-left"
+                className="block w-full flex-1 px-2.5 pb-2.5 pt-11 text-left"
               >
                 <p className="model-card__title break-words text-[15px] font-semibold leading-[1.2] text-on-surface">
                   {adapter.metadata.name}
