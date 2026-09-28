@@ -3,6 +3,8 @@ import {
   listOrphanedModels,
   listStoredModels,
   pruneSupersededModelCaches,
+  removeOrphanedModel,
+  removeStoredModel,
 } from './modelStorage'
 
 const CACHE_PATH = '/__lil_tart_model_cache__/'
@@ -181,5 +183,49 @@ describe('pruneSupersededModelCaches', () => {
 
     const remaining = await listStoredModels(HF)
     expect(remaining).toEqual([{ modelId: target, bytes: 500, assets: 1 }])
+  })
+})
+
+describe('base-scoped removal', () => {
+  // One model id can hold entries under two bases at once, so an unqualified
+  // delete from a "previous base" affordance would take the live copy with it.
+  const modelId = 'lfm2.5-encoder-230m'
+  const superseded = 'https://app.test/litert-community/encoder/resolve/main/model.tflite'
+  const current = `${HF}litert-community/encoder/resolve/main/model.tflite`
+
+  function seedBothBases() {
+    seed([
+      { url: cacheKeyUrl(modelId, current), bytes: 500, assetUrl: current },
+      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded },
+    ])
+  }
+
+  it('reclaims only the previous-base bytes when removing an orphan', async () => {
+    seedBothBases()
+
+    await removeOrphanedModel(modelId, HF)
+
+    expect(await listStoredModels(HF)).toEqual([{ modelId, bytes: 500, assets: 1 }])
+    expect(await listOrphanedModels(HF)).toEqual([])
+  })
+
+  it('leaves the previous-base bytes alone when removing the live copy', async () => {
+    seedBothBases()
+
+    await removeStoredModel(modelId, HF)
+
+    expect(await listStoredModels(HF)).toEqual([])
+    expect(await listOrphanedModels(HF)).toEqual([{ modelId, bytes: 500, assets: 1 }])
+  })
+
+  it('never removes another model that shares the superseded base', async () => {
+    seed([
+      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded },
+      { url: cacheKeyUrl('qwen3-tts', superseded), bytes: 700, assetUrl: superseded },
+    ])
+
+    await removeOrphanedModel(modelId, HF)
+
+    expect(await listOrphanedModels(HF)).toEqual([{ modelId: 'qwen3-tts', bytes: 700, assets: 1 }])
   })
 })

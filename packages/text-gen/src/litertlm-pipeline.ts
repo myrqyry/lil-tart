@@ -1,4 +1,5 @@
 import {
+  InferenceError,
   type ModelManifest,
   type Pipeline,
   type PipelineProgress,
@@ -193,6 +194,16 @@ function resolveModelReference(path: string, base?: string): string {
   }
 }
 
+function modelFetchError(path: string, error: unknown, signal: AbortSignal): Error {
+  if (signal.aborted) {
+    return new InferenceError('CANCELLED', `Model download cancelled for ${path}`, { asset: path, cause: error })
+  }
+  return new InferenceError('ASSET_FETCH_FAILED', `Failed to fetch model ${path}: ${String(error)}`, {
+    asset: path,
+    cause: error,
+  })
+}
+
 export interface LiteRtLmTextPipelineOptions {
   // Base the manifest's repo-relative asset path is resolved against. Omit to
   // pass the path through unchanged.
@@ -210,6 +221,7 @@ export class LiteRtLmTextPipeline
   private engine: LiteRtLmEngine | null = null;
   private conversation: LiteRtLmConversation | null = null;
   private loadMs = 0;
+  private loadAbort: AbortController | null = null;
   private readonly options: LiteRtLmTextPipelineOptions;
 
   constructor(
@@ -232,6 +244,12 @@ export class LiteRtLmTextPipeline
     this.status = 'loading';
     this.context = context;
     const loadStart = performance.now();
+    const controller = new AbortController();
+    this.loadAbort = controller;
+    // Cancelling from either side has to reach the transfer: the caller's signal,
+    // or dispose() on this pipeline.
+    const onExternalAbort = () => controller.abort();
+    context.signal?.addEventListener('abort', onExternalAbort, { once: true });
     try {
       this.report({ phase: 'loading', step: 1, total: 2 });
       const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
@@ -240,7 +258,7 @@ export class LiteRtLmTextPipeline
         this.manifest.assets.find((a) => a.id === 'model')?.path ??
         this.manifest.assets[0]?.path ??
         DEFAULTS.model;
-      const model = resolveModelReference(modelPath, this.options.modelBase);
+      const model = await this.resolveModelInput(modelPath, controller.signal);
       const backend = context.backend === 'webnn' ? undefined : context.backend;
       this.engine = await module.Engine.create({
         model,
@@ -250,9 +268,43 @@ export class LiteRtLmTextPipeline
       this.loadMs = performance.now() - loadStart;
       this.status = 'ready';
     } catch (e) {
-      this.status = 'error';
+      // A cancelled load is not a failure of the model; leave the pipeline
+      // retryable rather than latched to 'error'.
+      this.status = controller.signal.aborted ? 'idle' : 'error';
       throw e instanceof Error ? e : new Error(String(e));
+    } finally {
+      context.signal?.removeEventListener('abort', onExternalAbort);
     }
+  }
+
+  // With a model base, the fetch happens here so it can be aborted. The engine's own
+  // model fetch takes no signal, so a multi-gigabyte checkpoint cannot otherwise be
+  // cancelled when the caller switches models mid-download. Handing the engine the
+  // response body keeps the memory and streaming behaviour identical, because
+  // Engine.create treats a string and a ReadableStream the same way from there on.
+  private async resolveModelInput(
+    path: string,
+    signal: AbortSignal,
+  ): Promise<string | ReadableStream<Uint8Array>> {
+    const base = this.options.modelBase
+    // No base means nothing to resolve against, so keep the engine's own fetch.
+    if (!base) return path
+
+    const url = resolveModelReference(path, base)
+    let response: Response
+    try {
+      // credentials mirrors the engine's model fetch so a same-origin model server
+      // still works.
+      response = await fetch(url, { signal, credentials: 'same-origin' })
+    } catch (error) {
+      throw modelFetchError(path, error, signal)
+    }
+    if (!response.ok || !response.body) {
+      throw new InferenceError('ASSET_FETCH_FAILED', `HTTP ${response.status} fetching model ${path}`, {
+        asset: path,
+      })
+    }
+    return response.body
   }
 
   async run(
@@ -290,6 +342,9 @@ export class LiteRtLmTextPipeline
   }
 
   async dispose(): Promise<void> {
+    // Stop an in-flight model download even when the caller wired no signal.
+    this.loadAbort?.abort();
+    this.loadAbort = null;
     await this.conversation?.delete();
     this.conversation = null;
     await this.engine?.delete();

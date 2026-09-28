@@ -7,6 +7,7 @@ import {
   clearStoredModels,
   listOrphanedModels,
   listStoredModels,
+  removeOrphanedModel,
   removeStoredModel,
   type StoredModelInfo,
 } from '../modelStorage'
@@ -137,7 +138,19 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     setStorageBusy(true)
     try {
       if (loadedModelId === modelId) await handleUnload()
-      await removeStoredModel(modelId)
+      await removeStoredModel(modelId, modelBase)
+      await refreshStoredModels()
+    } finally {
+      setStorageBusy(false)
+    }
+  }
+
+  // Reclaims only the bytes written under a previous base. The live copy is a
+  // different cache entry and must survive, so this does not unload the model.
+  const handleRemoveOrphaned = async (modelId: string) => {
+    setStorageBusy(true)
+    try {
+      await removeOrphanedModel(modelId, modelBase)
       await refreshStoredModels()
     } finally {
       setStorageBusy(false)
@@ -229,7 +242,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                     key={model.modelId}
                     type="button"
                     title={`Remove ${model.modelId}`}
-                    onClick={() => void handleRemoveStored(model.modelId)}
+                    onClick={() => void handleRemoveOrphaned(model.modelId)}
                     disabled={storageBusy || loading}
                     className="rounded-md px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
                   >

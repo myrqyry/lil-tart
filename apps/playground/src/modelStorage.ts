@@ -127,9 +127,11 @@ export async function listStoredModels(base: string): Promise<StoredModelInfo[]>
   return collectStoredModels(base, true)
 }
 
-// Entries written under a base other than the one in use. They are unreachable
-// but not deleted: a user who typed the base can switch back to recover them, so
-// they are surfaced for deliberate removal instead of reclaimed automatically.
+// Entries written under a base other than the one in use. Listing them does not
+// reclaim them: a caller that switches the base back can recover what is here.
+// The exception is pruneSupersededModelCaches, which deletes the same set of
+// entries, but only where the base is a compile-time constant and therefore can
+// never be switched back to.
 export async function listOrphanedModels(base: string): Promise<StoredModelInfo[]> {
   return collectStoredModels(base, false)
 }
@@ -185,18 +187,31 @@ export async function pruneSupersededModelCaches(modelId: string, base: string):
   }
 }
 
-export async function removeStoredModel(modelId: string): Promise<void> {
+// Base-scoped removal. A model id can hold entries under more than one base, so
+// every delete must say which ones it means: otherwise a "reclaim the previous
+// base" action also destroys the live copy.
+export async function removeStoredModel(modelId: string, base: string): Promise<void> {
+  await removeMatching(modelId, base, true)
+}
+
+export async function removeOrphanedModel(modelId: string, base: string): Promise<void> {
+  await removeMatching(modelId, base, false)
+}
+
+async function removeMatching(modelId: string, base: string, keepMatching: boolean): Promise<void> {
   const storage = cacheStorage()
   if (!storage) return
 
   try {
     const cache = await storage.open(CACHE_NAME)
     const requests = await cache.keys()
-    await Promise.all(
-      requests
-        .filter((request) => modelIdFromRequest(request) === modelId)
-        .map((request) => cache.delete(request)),
-    )
+    for (const request of requests) {
+      if (modelIdFromRequest(request) !== modelId) continue
+      const response = await cache.match(request)
+      const matches = belongsToBase(response?.headers.get('x-lil-tart-asset-url'), base)
+      if (matches !== keepMatching) continue
+      await cache.delete(request)
+    }
   } catch {
     // Storage may be unavailable or blocked.
   }

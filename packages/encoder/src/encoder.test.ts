@@ -51,6 +51,7 @@ describe('EncoderPipeline', () => {
     await pipeline.load(context)
     expect(context.liteRt.loadModel).toHaveBeenCalledWith(
       'litert-community/LFM2.5-Encoder-230M/resolve/main/LFM2.5-Encoder-230M_fp16.tflite',
+      { signal: expect.any(AbortSignal) },
     )
     expect(pipeline.status).toBe('ready')
   })
@@ -82,5 +83,51 @@ describe('meanPool', () => {
 
   it('returns zeros for empty input', () => {
     expect(Array.from(meanPool(new Float32Array(0), 2, 3))).toEqual([0, 0, 0])
+  })
+})
+
+describe('EncoderPipeline cancellation', () => {
+  function hangingContext() {
+    const seen = { signal: null as AbortSignal | null }
+    return {
+      seen,
+      context: {
+        ...context,
+        liteRt: {
+          ...context.liteRt,
+          loadModel: vi.fn((_path: string, options?: { signal?: AbortSignal }) => {
+            seen.signal = options?.signal ?? null
+            return new Promise((_resolve, reject) => {
+              const fail = () => reject(new Error('CANCELLED'))
+              if (options?.signal?.aborted) fail()
+              else options?.signal?.addEventListener('abort', fail)
+            })
+          }),
+        },
+      },
+    }
+  }
+
+  it('aborts an in-flight model load when disposed', async () => {
+    const { seen, context: ctx } = hangingContext()
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    const loading = pipeline.load(ctx as never)
+    await pipeline.dispose()
+
+    await expect(loading).rejects.toThrow()
+    expect(seen.signal?.aborted).toBe(true)
+  })
+
+  it("follows the caller's signal and stays retryable", async () => {
+    const { seen, context: ctx } = hangingContext()
+    const controller = new AbortController()
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    const loading = pipeline.load({ ...ctx, signal: controller.signal } as never)
+    controller.abort()
+
+    await expect(loading).rejects.toThrow()
+    expect(seen.signal?.aborted).toBe(true)
+    // Cancelled is not latched to 'error', so a retry is possible.
+    expect(pipeline.status).toBe('idle')
   })
 })

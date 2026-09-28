@@ -84,7 +84,10 @@ describe('ColBertPipeline', () => {
 
     const pipeline = new ColBertPipeline()
     await pipeline.load(context as never)
-    expect(context.liteRt.loadModel).toHaveBeenCalledWith(colbertManifest.assets[0].path)
+    expect(context.liteRt.loadModel).toHaveBeenCalledWith(
+      colbertManifest.assets[0].path,
+      { signal: expect.any(AbortSignal) },
+    )
   })
 
   it('runs tokenization through the graph into a multi-vector embedding', async () => {
@@ -95,5 +98,51 @@ describe('ColBertPipeline', () => {
     expect(result.tokens).toBe(2)
     expect(result.dimensions).toBe(3)
     expect(Array.from(result.values)).toEqual([1, 2, 3, 4, 5, 6])
+  })
+})
+
+describe('ColBertPipeline cancellation', () => {
+  function hangingContext() {
+    const seen = { signal: null as AbortSignal | null }
+    return {
+      seen,
+      context: {
+        backend: 'wasm' as const,
+        assets: { resolve: vi.fn() },
+        signal: undefined,
+        liteRt: {
+          loadModel: vi.fn((_path: string, options?: { signal?: AbortSignal }) => {
+            seen.signal = options?.signal ?? null
+            return new Promise((_resolve, reject) => {
+              const fail = () => reject(new Error('CANCELLED'))
+              if (options?.signal?.aborted) fail()
+              else options?.signal?.addEventListener('abort', fail)
+            })
+          }),
+        },
+      },
+    }
+  }
+
+  it('aborts an in-flight model load when disposed', async () => {
+    const { seen, context: ctx } = hangingContext()
+    const pipeline = new ColBertPipeline()
+    const loading = pipeline.load(ctx as never)
+    await pipeline.dispose()
+
+    await expect(loading).rejects.toThrow()
+    expect(seen.signal?.aborted).toBe(true)
+  })
+
+  it("follows the caller's signal and stays retryable", async () => {
+    const { seen, context: ctx } = hangingContext()
+    const controller = new AbortController()
+    const pipeline = new ColBertPipeline()
+    const loading = pipeline.load({ ...ctx, signal: controller.signal } as never)
+    controller.abort()
+
+    await expect(loading).rejects.toThrow()
+    expect(seen.signal?.aborted).toBe(true)
+    expect(pipeline.status).toBe('idle')
   })
 })

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RuntimeContext } from '@litert-playground/inference-core';
 import { TransformersTextPipeline } from "./transformers-pipeline";
 import { LiteRtLmTextPipeline } from "./litertlm-pipeline";
@@ -34,8 +34,25 @@ function fakeContext(): RuntimeContext {
   };
 }
 
-function streamOf(chunks: string[]): ReadableStream<{ text: string }> {
-  return new ReadableStream({
+// A model fetch stub that hands back a real response body, which is what the
+// pipeline must pass to the engine in place of a bare URL.
+function stubFetch() {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array([1]));
+      controller.close();
+    },
+  });
+  const mock = vi.fn().mockResolvedValue({ ok: true, status: 200, body });
+  const original = globalThis.fetch;
+  globalThis.fetch = mock as unknown as typeof fetch;
+  afterEach(() => {
+    globalThis.fetch = original;
+  });
+  return mock;
+}
+
+function streamOf(chunks: string[]): ReadableStream<{ text: string }> {  return new ReadableStream({
     start(controller) {
       for (const c of chunks) controller.enqueue({ text: c });
       controller.close();
@@ -172,25 +189,25 @@ describe("LiteRtLmTextPipeline", () => {
   // context.assets would materialize the whole model into an ArrayBuffer first,
   // which is the wrong memory trade for a 1.2B-parameter model in a browser.
   it("passes an absolute URL so the engine streams the model itself", async () => {
+    const fetchMock = stubFetch();
     const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
       modelBase: "https://huggingface.co/",
     });
     await p.load(fakeContext());
 
-    expect(mockEngineCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model:
-          "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
-        backend: "wasm",
-      })
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      expect.objectContaining({ credentials: "same-origin" })
     );
 
+    // The engine must receive the response body, not the URL, so the transfer is ours.
     const passed = mockEngineCreate.mock.calls[0][0].model;
-    expect(typeof passed).toBe("string");
-    expect(passed).not.toBeInstanceOf(Blob);
+    expect(passed).toBeInstanceOf(ReadableStream);
+    expect(typeof passed).not.toBe("string");
   });
 
   it("never buffers the checkpoint through the asset resolver", async () => {
+    const fetchMock = stubFetch();
     const resolve = vi.fn();
     const stream = vi.fn();
     const context: RuntimeContext = {
@@ -206,19 +223,104 @@ describe("LiteRtLmTextPipeline", () => {
     // Buffering here is the regression this test exists to prevent.
     expect(resolve).not.toHaveBeenCalled();
     expect(stream).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels the model download when the caller's signal aborts", async () => {
+    const controller = new AbortController();
+    const seenSignal = { current: null as AbortSignal | null };
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+      seenSignal.current = init?.signal ?? null;
+      return Promise.reject(new DOMException("aborted", "AbortError"));
+    }) as unknown as typeof fetch;
+    const context: RuntimeContext = { ...fakeContext(), signal: controller.signal };
+
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+        modelBase: "https://huggingface.co/",
+      });
+      const loading = p.load(context);
+      controller.abort();
+      await expect(loading).rejects.toThrow(/cancelled/i);
+
+      // The signal handed to fetch is the one we control.
+      expect(seenSignal.current?.aborted).toBe(true);
+      // Cancelled is retryable, not latched to 'error'.
+      expect(p.status).toBe("idle");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("cancels an in-flight download when the pipeline is disposed", async () => {
+    const seenSignal = { current: null as AbortSignal | null };
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn((_url: unknown, init?: { signal?: AbortSignal }) => {
+      seenSignal.current = init?.signal ?? null;
+      return new Promise((_resolve, reject) => {
+        const fail = () => reject(new DOMException("aborted", "AbortError"));
+        // Native fetch rejects immediately for an already-aborted signal.
+        if (init?.signal?.aborted) fail();
+        else init?.signal?.addEventListener("abort", fail);
+      });
+    }) as unknown as typeof fetch;
+
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+        modelBase: "https://huggingface.co/",
+      });
+      const loading = p.load(fakeContext());
+      await p.dispose();
+      await expect(loading).rejects.toThrow(/cancelled/i);
+      expect(seenSignal.current?.aborted).toBe(true);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("reports a failed model fetch as a fetch error, not a cancellation", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 404, body: null });
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+        modelBase: "https://huggingface.co/",
+      });
+      await expect(p.load(fakeContext())).rejects.toThrow(/HTTP 404/);
+      expect(p.status).toBe("error");
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("leaves the engine's own fetch alone when no model base is set", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = vi.fn();
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+      await p.load(fakeContext());
+      expect(globalThis.fetch).not.toHaveBeenCalled();
+      expect(mockEngineCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model:
+            "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+        })
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it("resolves against a model base that has no trailing slash", async () => {
+    const fetchMock = stubFetch();
     const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
       modelBase: "https://huggingface.co/litert-community",
     });
     await p.load(fakeContext());
 
-    expect(mockEngineCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model:
-          "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
-      })
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      expect.anything()
     );
   });
 });

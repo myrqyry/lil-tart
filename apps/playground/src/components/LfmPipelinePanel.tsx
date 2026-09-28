@@ -72,10 +72,15 @@ export function LfmPipelinePanel() {
   const pipelineRef = useRef<AnyPipeline | null>(null)
   const ctxRef = useRef<ManagedLiteRtRuntimeContext | null>(null)
   const loadGenerationRef = useRef(0)
+  const loadAbortRef = useRef<AbortController | null>(null)
 
   const entry = MODELS.find(m => m.id === modelId) ?? MODELS[0]
 
   const disposePipeline = async () => {
+    // Abort first: a model download in flight must stop pulling bytes before the
+    // pipeline it belongs to is thrown away.
+    loadAbortRef.current?.abort()
+    loadAbortRef.current = null
     const pipeline = pipelineRef.current
     const ctx = ctxRef.current
     pipelineRef.current = null
@@ -103,9 +108,12 @@ export function LfmPipelinePanel() {
       // No assetBase: the playground ships no public/wasm/ directory, so origin-relative
       // resolution 404s. Omitting it selects the runtime's pinned @litertjs/core CDN
       // fallback, which means the LiteRT WASM runtime is fetched from jsDelivr.
+      const loadAbort = new AbortController()
+      loadAbortRef.current = loadAbort
       ctx = await createLiteRtRuntime({
         assets: createModelLibraryAssetResolver(MODEL_BASE),
         supportedBackends: { webgpu: true, wasm: true },
+        signal: loadAbort.signal,
       })
       if (generation !== loadGenerationRef.current) {
         ctx.liteRt.dispose()
@@ -181,7 +189,7 @@ export function LfmPipelinePanel() {
     try {
       loadGenerationRef.current += 1
       await disposePipeline()
-      await removeStoredModel(entry.manifest.modelId)
+      await removeStoredModel(entry.manifest.modelId, MODEL_BASE)
       setStatus('Not loaded')
       setProgress('')
       setStoredInfo(null)

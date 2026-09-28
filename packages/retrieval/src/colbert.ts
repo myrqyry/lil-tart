@@ -52,6 +52,7 @@ export class ColBertPipeline
 
   private model: CompiledModel | null = null
   private tokenizer: TransformersTokenizer | null = null
+  private loadAbort: AbortController | null = null
 
   constructor(options: ColBertPipelineOptions = {}) {
     this.manifest = options.manifest ?? colbertManifest
@@ -60,6 +61,12 @@ export class ColBertPipeline
   async load(context: RuntimeContext): Promise<void> {
     if (this.status === 'ready') return
     this.status = 'loading'
+    // The model load is the cancellable part; the tokenizer fetch is not, because
+    // transformers.js exposes no signal for from_pretrained.
+    const controller = new AbortController()
+    this.loadAbort = controller
+    const onExternalAbort = () => controller.abort()
+    context.signal?.addEventListener('abort', onExternalAbort, { once: true })
     try {
       this.report({ phase: 'loading-tokenizer', step: 1, total: 3 })
       const transformers = (await import('@huggingface/transformers')) as unknown as TransformersModule
@@ -68,12 +75,15 @@ export class ColBertPipeline
       this.tokenizer = await transformers.AutoTokenizer.from_pretrained(repoId)
       this.report({ phase: 'loading-model', step: 2, total: 3 })
       const modelPath = this.manifest.assets[0].path
-      this.model = (await context.liteRt.loadModel(modelPath)) as CompiledModel
+      this.model = (await context.liteRt.loadModel(modelPath, { signal: controller.signal })) as CompiledModel
       this.report({ phase: 'ready', step: 3, total: 3 })
       this.status = 'ready'
     } catch (e) {
-      this.status = 'error'
+      // A cancelled load is retryable, not a model failure.
+      this.status = controller.signal.aborted ? 'idle' : 'error'
       throw e instanceof Error ? e : new Error(String(e))
+    } finally {
+      context.signal?.removeEventListener('abort', onExternalAbort)
     }
   }
 
@@ -106,6 +116,9 @@ export class ColBertPipeline
   }
 
   async dispose(): Promise<void> {
+    // Stop an in-flight model download even when the caller wired no signal.
+    this.loadAbort?.abort()
+    this.loadAbort = null
     this.model = null
     this.tokenizer = null
     this.status = 'disposed'
