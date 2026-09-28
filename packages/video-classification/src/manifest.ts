@@ -20,7 +20,7 @@ export const moViNetManifest: ModelManifest = {
     qualification: 'limited',
     upstreamRevision: 'c2ceda0efa7344ba5a95c3eeaa9925cb0940e453',
     environments: [
-      { browser: 'Chromium 151', backend: 'wasm', runtime: '@litertjs/core 2.5.3 measured pass (edge-compat 2026-08-11)' },
+      { browser: 'Chromium 151 (external sweep)', backend: 'wasm', runtime: '@litertjs/core 2.5.3; edge-compat 2026-08-11 sweep; WebGPU output mismatch' },
     ],
     expectedOutput: {
       preprocessing: [
