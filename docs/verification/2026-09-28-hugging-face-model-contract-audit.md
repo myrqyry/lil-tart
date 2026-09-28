@@ -46,14 +46,23 @@ Exact-artifact LiteRT.js 2.5.3 browser sweeps show WebGPU output mismatches for 
 - PP-OCRv5 recognizer
 - Matcha-TTS decoder and vocoder
 - Mimi encoder-transformer and decoder-transformer
-- SAM2 mask decoder
 
-MoViNet-A0 Stream is also restricted to WASM in its package manifest and pipeline because its exact LiteRT.js WebGPU artifact runs but does not match the WASM output.
+MoViNet-A0 Stream is also restricted to WASM in its package manifest and pipeline because the external exact-artifact LiteRT.js sweep reports WebGPU output mismatch. Its manifest verification states remain `untested` until lil-tart captures its own durable verification receipt; the external sweep is recorded as backend-selection evidence, not silently promoted into repo-owned verification.
+
+## Runtime receipt semantics
+
+Backend policy is now explicit in receipts:
+
+- **selected backend** is what the user chose in the playground,
+- **runtime request** is the backend lil-tart actually passed to LiteRT after applying a verified model/graph constraint,
+- **resolved backend** is what LiteRT ultimately executed.
+
+A correctness pin such as selected WebGPU → runtime request WASM → resolved WASM is **not** counted or described as a runtime fallback. Per-graph inference events also retain their own requested and resolved backends.
 
 ## Intentionally unavailable instead of fake-working
 
 - **CLIPSeg** remains disabled. Its old adapter passed token IDs directly into a graph that expects `[1,77,512]` token embeddings, discarded two of the three vision features, and did not perform the required text projection. Its real host embedding/projection path must be implemented before re-enabling it.
-- **SAM2 mask decoder** remains disabled as a standalone card. Asking a user to manually provide encoder feature maps and a pre-encoded sparse prompt is not a usable image-segmentation pipeline.
+- **SAM2 mask decoder** remains disabled as a standalone card. Asking a user to manually provide encoder feature maps and a pre-encoded sparse prompt is not a usable image-segmentation pipeline. The external sweep records a WebGPU mismatch, but the disabled adapter carries no active `requiredBackend` pin; the future live pipeline must apply and verify its backend constraint when it becomes executable.
 - **YOLO26 / YOLO11 / YOLOv8 segmentation** remain disabled. Hugging Face exports now exist, but the available EdgeFirst artifacts use uint8 input and split quantized int8 outputs, which do not match the old float32 single-output placeholders.
 - **Magenta RealTime 2** remains disabled. The official Hugging Face repo exists, but the product is a multi-component SpectroStream + MusicCoCa + decoder pipeline; the old single `magenta.tflite` card is not a verified model contract.
 - **MusicCoCa components** remain disabled until their official Hugging Face artifacts and browser contracts are wired and qualified end-to-end.
@@ -62,7 +71,7 @@ MoViNet-A0 Stream is also restricted to WASM in its package manifest and pipelin
 
 Focused tests lock:
 - CREPE positional invocation,
-- SAM2 v2 artifact/output contracts and decoder availability state,
+- SAM2 v2 artifact/output contracts and decoder disabled state without an inactive backend pin,
 - CLIPSeg disabled state,
 - known browser-mismatch backend restrictions,
 - U-2-Net per-image-max preprocessing.
