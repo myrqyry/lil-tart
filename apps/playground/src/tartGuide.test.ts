@@ -9,6 +9,7 @@ function snapshot(overrides: Partial<TartGuideSnapshot> = {}): TartGuideSnapshot
     progressPercent: null,
     error: null,
     requestedBackend: 'auto',
+    executionBackend: null,
     resolvedBackend: null,
     fallbackCount: 0,
     preflightComplete: false,
@@ -77,11 +78,29 @@ describe('getTartGuideMessage', () => {
     expect(message.message).toContain('WEBGPU')
   })
 
+  it('surfaces an explicit correctness override without calling it a fallback', () => {
+    const message = getTartGuideMessage(snapshot({
+      selectedModelName: 'Tiny Model',
+      loaded: true,
+      requestedBackend: 'webgpu',
+      executionBackend: 'wasm',
+      resolvedBackend: 'wasm',
+      fallbackCount: 0,
+    }))
+
+    expect(message.tone).toBe('warning')
+    expect(message.kicker).toBe('Correctness override')
+    expect(message.message).toContain('WEBGPU')
+    expect(message.message).toContain('WASM')
+    expect(message.message).toContain('not a runtime fallback')
+  })
+
   it('surfaces backend fallback before celebrating success', () => {
     const message = getTartGuideMessage(snapshot({
       selectedModelName: 'Tiny Model',
       loaded: true,
       requestedBackend: 'webgpu',
+      executionBackend: 'webgpu',
       resolvedBackend: 'wasm',
       fallbackCount: 1,
       pathProofAvailable: true,
