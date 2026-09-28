@@ -226,7 +226,7 @@ export default function ModelList({
               onClick={() => setActiveFilter(filter)}
               aria-label={FILTER_LABELS[filter]}
               title={FILTER_LABELS[filter]}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[13px] font-medium transition-all ${
+              className={`filter-chip flex shrink-0 items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium ${
                 active
                   ? family
                     ? `border-current bg-surface-container-high ${FILTER_COLOR_CLASS[family]}`
