@@ -78,7 +78,7 @@ body {
   min-height: 100vh;
   margin: 0;
   font-family: inherit;
-  font-variation-settings: "opsz" 14, "wdth" 100, "wght" 440;
+  font-variation-settings: "opsz" 14, "wdth" 100;
   letter-spacing: -0.006em;
   background:
     radial-gradient(circle at 12% -6%, oklch(0.33 0.07 350 / 0.20), transparent 28rem),
@@ -144,7 +144,7 @@ h1 {
 }
 
 .workspace-grid {
-  animation: expressive-enter 520ms var(--ease-emphasized) both;
+  animation: expressive-enter 520ms var(--ease-emphasized) backwards;
 }
 
 .neo-pod {
@@ -327,6 +327,7 @@ h1 {
 }
 
 .filter-chip {
+  border: 1px solid transparent;
   border-radius: 999px;
   box-shadow:
     3px 4px 8px oklch(0.025 0.01 330 / 0.34),
@@ -347,6 +348,7 @@ h1 {
 }
 
 .tart-guide {
+  border: 1px solid transparent;
   border-radius: 2rem 2.45rem 2rem 2.6rem;
   box-shadow:
     7px 9px 18px oklch(0.025 0.01 330 / 0.36),
@@ -403,7 +405,7 @@ h1 {
     transform 340ms var(--ease-spring),
     border-radius 340ms var(--ease-spring),
     box-shadow 260ms ease;
-  animation: card-arrive 420ms var(--ease-emphasized) both;
+  animation: card-arrive 420ms var(--ease-emphasized) backwards;
 }
 
 .model-card:nth-child(2n) {
