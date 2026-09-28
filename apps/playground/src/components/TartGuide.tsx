@@ -26,7 +26,7 @@ function TartMascot({ tone, compact = false }: { tone: TartGuideTone; compact?: 
       viewBox="0 0 120 120"
       role="img"
       aria-label="Lil Tart mascot"
-      className={compact ? 'h-14 w-14' : 'h-20 w-20 shrink-0'}
+      className={`tart-mascot ${compact ? 'h-14 w-14' : 'h-20 w-20 shrink-0'}`}
     >
       <ellipse cx="60" cy="103" rx="34" ry="7" fill="currentColor" opacity="0.12" />
 
@@ -93,7 +93,7 @@ export default function TartGuide({ guide, onRunPreflight, embedded = false }: T
       <button
         type="button"
         onClick={() => setCollapsed(false)}
-        className="fixed bottom-4 right-4 z-50 rounded-full border border-outline/50 bg-surface-container-high p-1.5 text-on-surface shadow-lg transition-transform hover:scale-105"
+        className="neo-fab fixed bottom-4 right-4 z-50 p-1.5 text-on-surface"
         aria-label="Open Lil Tart guide"
         title="Open Lil Tart guide"
       >
@@ -105,8 +105,8 @@ export default function TartGuide({ guide, onRunPreflight, embedded = false }: T
   return (
     <aside
       className={`${embedded
-        ? 'w-full rounded-xl border p-3 text-on-surface'
-        : 'fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-xl border p-2.5 text-on-surface shadow-xl backdrop-blur-md'} ${toneClasses[guide.tone]}`}
+        ? 'tart-guide tart-guide--embedded w-full p-3.5 text-on-surface'
+        : 'tart-guide fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] p-3 text-on-surface backdrop-blur-md'} ${toneClasses[guide.tone]}`}
       aria-label="Lil Tart guide"
     >
       <div className="flex items-start gap-2.5">
@@ -139,7 +139,7 @@ export default function TartGuide({ guide, onRunPreflight, embedded = false }: T
             <button
               type="button"
               onClick={onRunPreflight}
-              className="mt-2 rounded-lg bg-primary px-3 py-1.5 text-[13px] font-semibold text-on-primary shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+              className="expressive-primary-button mt-2 px-3.5 py-2 text-[13px] font-semibold text-on-primary"
             >
               {guide.actionLabel ?? 'Run preflight'}
             </button>
