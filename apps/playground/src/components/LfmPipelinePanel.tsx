@@ -139,7 +139,7 @@ export function LfmPipelinePanel() {
       setProgress('')
       await pruneSupersededModelCaches(m.manifest.modelId, MODEL_BASE)
       const stored = await listStoredModels(MODEL_BASE)
-      setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
+      setStoredInfo(m.kind === 'text' ? null : stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
     } catch (e: unknown) {
       if (generation !== loadGenerationRef.current) return
       if (nextPipeline) {
@@ -155,7 +155,7 @@ export function LfmPipelinePanel() {
   const refreshStoredInfo = useCallback(async (id: string) => {
     const m = MODELS.find((model) => model.id === id) ?? MODELS[0]
     const stored = await listStoredModels(MODEL_BASE)
-    setStoredInfo(stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
+    setStoredInfo(m.kind === 'text' ? null : stored.find((model) => model.modelId === m.manifest.modelId) ?? null)
   }, [])
 
   useEffect(() => {
@@ -173,6 +173,7 @@ export function LfmPipelinePanel() {
     loadGenerationRef.current += 1
     void disposePipeline()
     setModelId(id)
+    setStoredInfo(null)
     setStatus('Not loaded')
     setError(null)
     setProgress('')
@@ -250,6 +251,11 @@ export function LfmPipelinePanel() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-sm text-on-surface-variant">Status: {status}</div>
+          {entry.kind === 'text' && (
+            <div className="mt-0.5 text-[11px] text-on-surface-variant">
+              Text weights stream on each load; not saved in the model library.
+            </div>
+          )}
           {storedInfo && (
             <div className="mt-0.5 text-[11px] text-on-surface-variant">
               Stored locally · {(storedInfo.bytes / 1e6).toFixed(1)} MB

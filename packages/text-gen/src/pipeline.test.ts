@@ -202,10 +202,10 @@ describe("LiteRtLmTextPipeline", () => {
 
   // The manifest path is repo-relative. Handing it to the engine raw makes the
   // browser resolve it against the app origin, which 404s, so it has to be made
-  // absolute. The engine streams the checkpoint itself: routing through
+  // absolute. The pipeline hands the response body to the engine: routing through
   // context.assets would materialize the whole model into an ArrayBuffer first,
   // which is the wrong memory trade for a 1.2B-parameter model in a browser.
-  it("passes an absolute URL so the engine streams the model itself", async () => {
+  it("fetches the absolute URL and hands the response stream to the engine", async () => {
     const fetchMock = stubFetch();
     const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
       modelBase: "https://huggingface.co/",
@@ -458,3 +458,67 @@ describe("selectTextGenerationManifest", () => {
     expect(lfm2_5InstructManifest.capabilities).not.toContain("reasoning");
   });
 });
+
+
+describe('LiteRtLmTextPipeline disposal boundaries', () => {
+  it('rejects loading a disposed instance', async () => {
+    const p = new LiteRtLmTextPipeline()
+    await p.dispose()
+    await expect(p.load(fakeContext())).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(mockEngineCreate).not.toHaveBeenCalled()
+  })
+
+  it('preserves cancellation when deleting a late engine fails', async () => {
+    const cleanupError = new Error('engine delete failed')
+    const engine = { delete: vi.fn().mockRejectedValue(cleanupError) }
+    let release!: () => void
+    mockEngineCreate.mockReturnValue(new Promise(resolve => { release = () => resolve(engine) }))
+    const p = new LiteRtLmTextPipeline()
+    const loading = p.load(fakeContext())
+    await waitFor(() => mockEngineCreate.mock.calls.length > 0, 'engine compile to start')
+    await p.dispose()
+    release()
+    await expect(loading).rejects.toMatchObject({ code: 'CANCELLED', cause: cleanupError })
+    expect(engine.delete).toHaveBeenCalledTimes(1)
+    expect(p.status).toBe('disposed')
+  })
+
+  it.each(['conversation', 'engine'])('finishes disposal even when %s cleanup rejects', async (failure) => {
+    const cleanupError = new Error('delete failed')
+    const conversation = {
+      sendMessage: vi.fn(), sendMessageStreaming: mockSendMessageStreaming, cancel: vi.fn(),
+      delete: failure === 'conversation' ? vi.fn().mockRejectedValue(cleanupError) : vi.fn().mockResolvedValue(undefined),
+    }
+    const engine = {
+      createConversation: vi.fn().mockResolvedValue(conversation),
+      delete: failure === 'engine' ? vi.fn().mockRejectedValue(cleanupError) : vi.fn().mockResolvedValue(undefined),
+    }
+    mockEngineCreate.mockResolvedValue(engine)
+    const p = new LiteRtLmTextPipeline()
+    await p.load(fakeContext())
+    await p.run({ messages: [{ role: 'user', content: 'hi' }] })
+    await expect(p.dispose()).rejects.toBe(cleanupError)
+    expect(conversation.delete).toHaveBeenCalledTimes(1)
+    expect(engine.delete).toHaveBeenCalledTimes(1)
+    expect(p.status).toBe('disposed')
+    expect(p).toHaveProperty('conversation', null)
+    expect(p).toHaveProperty('engine', null)
+    await expect(p.load(fakeContext())).rejects.toMatchObject({ code: 'CANCELLED' })
+  })
+})
+
+
+it('keeps text generation disposed when an in-flight stream finishes', async () => {
+  let finish!: () => void
+  mockSendMessageStreaming.mockReturnValue(new ReadableStream({
+    start(controller) { finish = () => controller.close() },
+  }))
+  const p = new LiteRtLmTextPipeline()
+  await p.load(fakeContext())
+  const running = p.run({ messages: [{ role: 'user', content: 'hi' }] })
+  await waitFor(() => mockSendMessageStreaming.mock.calls.length > 0, 'generation stream to start')
+  await p.dispose()
+  finish()
+  await running
+  expect(p.status).toBe('disposed')
+})

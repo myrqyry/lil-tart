@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { pipelineLoadCancellationCase } from './case'
 import { ABORT_PROBE_BYTES, ABORT_PROBE_PATH } from './probeAsset.meta'
@@ -27,16 +28,10 @@ describe('pipeline load cancellation contract', () => {
   // the ignore rule would have left it green while a 24 MiB binary sat one `git add`
   // away from a permanent commit.
   it('keeps the generated probe asset out of version control', () => {
-    const gitignore = readFileSync(new URL('../../../.gitignore', import.meta.url), 'utf8')
-    const directory = ABORT_PROBE_PATH.split('/')[0]
-    const rules = gitignore
-      .split('\n')
-      .map((line) => line.trim())
-      .filter((line) => line && !line.startsWith('#'))
-    const ignored = rules.some((rule) => {
-      const normalized = rule.replace(/^\/+|\/+$/g, '')
-      return normalized === directory || normalized === `/${directory}`
-    })
-    expect(ignored, `${directory} must be ignored so the generated asset cannot be committed`).toBe(true)
+    const root = fileURLToPath(new URL('../../../', import.meta.url))
+    const ignored = execFileSync('git', ['check-ignore', '--no-index', '--', ABORT_PROBE_PATH], {
+      cwd: root, encoding: 'utf8',
+    }).trim()
+    expect(ignored).toBe(ABORT_PROBE_PATH)
   })
 })

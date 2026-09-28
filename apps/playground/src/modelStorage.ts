@@ -13,6 +13,7 @@ export interface StoredModelInfo {
   modelId: string
   bytes: number
   assets: number
+  unverified?: boolean
 }
 
 function pageBase(): string {
@@ -46,44 +47,30 @@ function normalizeBase(base: string): string {
   return new URL(base, pageBase()).href
 }
 
-// Cache keys embed the resolved absolute URL, so changing a resolver's base orphans
-// everything written under the previous base. Entries written under another base can
-// never be read again, so they must not be counted as stored.
-//
-// Membership is reachability: would the current base resolve this entry's asset path to
-// the URL the entry was stored under? Comparing base strings is not equivalent, in both
-// directions. A nested base is too loose: https://host/ would claim an entry cached at
-// https://host/v1/model.tflite that the resolver will now request as
-// https://host/model.tflite. And a base whose last segment is a file rather than a
-// directory is too strict: https://host/ and https://host/v1 both resolve the path
-// "v1/model.tflite" to https://host/v1/model.tflite, so a plain string comparison would
-// call a still-reachable entry orphaned and offer to delete live bytes.
-// Entries written before the path was recorded fall back to base equality, and before
-// that to a structural prefix comparison.
-function belongsToBase(
-  assetUrl: string | null | undefined,
-  base: string,
-  recordedBase?: string | null,
-  recordedPath?: string | null,
-): boolean {
-  if (!assetUrl) return false
-  if (recordedPath) {
-    try {
-      return new URL(recordedPath, normalizeBase(base)).href === assetUrl
-    } catch {
-      return false
-    }
-  }
-  if (recordedBase) return recordedBase === normalizeBase(base)
+// Membership follows the resolver's exact URL semantics, including absolute,
+// root-relative and slash-less paths. Old entries may lack the original path;
+// recover it from registered assets when possible, otherwise preserve the bytes
+// as unverified rather than guessing that they are safe to delete.
+function belongsToBase(response: Response | undefined, modelId: string, base: string): boolean | null {
+  const assetUrl = response?.headers.get('x-lil-tart-asset-url')
+  if (!assetUrl) return null
   try {
-    const target = new URL(base, pageBase())
-    const actual = new URL(assetUrl, pageBase())
-    if (actual.origin !== target.origin) return false
-    if (actual.pathname === target.pathname) return true
-    const prefix = target.pathname.endsWith('/') ? target.pathname : `${target.pathname}/`
-    return actual.pathname.startsWith(prefix)
+    const target = normalizeBase(base)
+    const path = response?.headers.get('x-lil-tart-asset-path')
+    if (path) return resolvedAssetUrl(path, target) === assetUrl
+
+    const recordedBase = response?.headers.get('x-lil-tart-base')
+    const candidates = [...assetOwners].filter(([, owner]) => owner === modelId)
+    // A currently registered path resolving to this key proves reachability even
+    // when the cache predates path/base metadata.
+    if (candidates.some(([candidate]) => resolvedAssetUrl(candidate, target) === assetUrl)) return true
+    if (recordedBase) {
+      if (normalizeBase(recordedBase) === target) return true
+      if (candidates.some(([candidate]) => resolvedAssetUrl(candidate, recordedBase) === assetUrl)) return false
+    }
+    return null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -155,11 +142,10 @@ export async function listStoredModels(base: string): Promise<StoredModelInfo[]>
   return collectStoredModels(base, true)
 }
 
-// Entries written under a base other than the one in use. Listing them does not
-// reclaim them: a caller that switches the base back can recover what is here.
-// The exception is pruneSupersededModelCaches, which deletes the same set of
-// entries, but only where the base is a compile-time constant and therefore can
-// never be switched back to.
+// Lists unreachable and unverified legacy entries without deleting them. The
+// free-text ModelRunner leaves them for deliberate removal. The fixed-base LFM
+// panel also calls pruneSupersededModelCaches after loading; that removes only
+// proven orphans for its model. Unverified entries are retained in both paths.
 export async function listOrphanedModels(base: string): Promise<StoredModelInfo[]> {
   return collectStoredModels(base, false)
 }
@@ -177,17 +163,13 @@ async function collectStoredModels(base: string, keepMatching: boolean): Promise
       const modelId = modelIdFromRequest(request)
       if (!modelId) continue
       const response = await cache.match(request)
-      const matches = belongsToBase(
-        response?.headers.get('x-lil-tart-asset-url'),
-        base,
-        response?.headers.get('x-lil-tart-base'),
-        response?.headers.get('x-lil-tart-asset-path'),
-      )
-      if (matches !== keepMatching) continue
+      const matches = belongsToBase(response, modelId, base)
+      if (keepMatching ? matches !== true : matches === true) continue
       const bytes = Number(response?.headers.get('x-lil-tart-bytes') ?? 0)
       const current = models.get(modelId) ?? { modelId, bytes: 0, assets: 0 }
       current.bytes += Number.isFinite(bytes) ? bytes : 0
       current.assets += 1
+      if (matches === null) current.unverified = true
       models.set(modelId, current)
     }
 
@@ -197,9 +179,10 @@ async function collectStoredModels(base: string, keepMatching: boolean): Promise
   }
 }
 
-// Reclaims entries for one model that were written under a superseded base.
-// Only called with the base the caller is actively using, so it cannot touch
-// another panel's cache. Returns how many entries were removed.
+// Reclaims proven orphans for one model relative to the supplied base. This is
+// currently called only by the fixed-base LFM panel. Another panel using the same
+// model id at a different base would share this deletion scope. Unknown legacy
+// entries are never pruned. Returns how many entries were removed.
 export async function pruneSupersededModelCaches(modelId: string, base: string): Promise<number> {
   const storage = cacheStorage()
   if (!storage) return 0
@@ -211,7 +194,7 @@ export async function pruneSupersededModelCaches(modelId: string, base: string):
     for (const request of requests) {
       if (modelIdFromRequest(request) !== modelId) continue
       const response = await cache.match(request)
-      if (belongsToBase(response?.headers.get('x-lil-tart-asset-url'), base)) continue
+      if (belongsToBase(response, modelId, base) !== false) continue
       if (await cache.delete(request)) removed += 1
     }
     return removed
@@ -242,12 +225,7 @@ async function removeMatching(modelId: string, base: string, keepMatching: boole
     for (const request of requests) {
       if (modelIdFromRequest(request) !== modelId) continue
       const response = await cache.match(request)
-      const matches = belongsToBase(
-        response?.headers.get('x-lil-tart-asset-url'),
-        base,
-        response?.headers.get('x-lil-tart-base'),
-        response?.headers.get('x-lil-tart-asset-path'),
-      )
+      const matches = belongsToBase(response, modelId, base)
       if (matches !== keepMatching) continue
       await cache.delete(request)
     }

@@ -8,7 +8,6 @@ import { runBrowserQualification } from './shared/browserHarness'
 import type { QualificationBackend, QualificationResult, QualificationSelection } from './schema/types'
 import { tinyLitertBaselineCase } from './tiny-litert-baseline/case'
 import { pipelineLoadCancellationCase } from './pipeline-load-cancellation/case'
-import { ensureAbortProbeAsset } from './pipeline-load-cancellation/probeAsset'
 
 export interface QualificationCliOptions {
   caseIds?: string[]
@@ -64,8 +63,8 @@ export function formatQualificationMatrix(results: QualificationResult[]): strin
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
-  if (args.includes('--help')) return
   const options = parseQualificationArgs(args)
+  if (args.includes('--help')) return
   const selection: QualificationSelection = {
     caseIds: options.caseIds,
     backends: options.backends,
@@ -76,13 +75,6 @@ async function main(): Promise<void> {
   const browserCases = options.caseIds
     ? cases
     : cases.filter((qualificationCase) => qualificationCase.evidenceKind === 'browser-observation')
-  // Generated here, after argument parsing and only for the cases that declare the
-  // dependency. Writing it at module scope made `pnpm qualify -- --help` and the
-  // `pnpm test:qualification` gate both materialise a 24 MiB binary as a side effect of
-  // merely importing this CLI.
-  if (browserCases.some((qualificationCase) => qualificationCase.requiresProbeAsset)) {
-    ensureAbortProbeAsset()
-  }
   const results = await runBrowserQualification(browserCases, {
     launch: { browserName: options.browserName, headless: !options.headed },
     selection,

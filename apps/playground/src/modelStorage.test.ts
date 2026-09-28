@@ -1,5 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  createModelLibraryAssetResolver,
+  registerModelAssets,
   listOrphanedModels,
   listStoredModels,
   pruneSupersededModelCaches,
@@ -16,6 +18,7 @@ interface FakeEntry {
   assetUrl: string
   base?: string
   path?: string
+  body?: ArrayBuffer
 }
 
 // One shared store, so deletions persist across open() calls the way real
@@ -36,20 +39,25 @@ function cache() {
     match: async (request: Request) => {
       const entry = store.get(request.url)
       if (!entry) return undefined
-      return {
+      return new Response(entry.body ?? new Uint8Array(entry.bytes), {
         headers: {
-          get: (name: string) =>
-            name === 'x-lil-tart-bytes'
-              ? String(entry.bytes)
-              : name === 'x-lil-tart-asset-url'
-                ? entry.assetUrl
-                : name === 'x-lil-tart-base'
-                  ? entry.base ?? null
-                  : name === 'x-lil-tart-asset-path'
-                    ? entry.path ?? null
-                    : null,
+          'x-lil-tart-bytes': String(entry.bytes),
+          'x-lil-tart-asset-url': entry.assetUrl,
+          ...(entry.base ? { 'x-lil-tart-base': entry.base } : {}),
+          ...(entry.path ? { 'x-lil-tart-asset-path': entry.path } : {}),
         },
-      }
+      })
+    },
+    put: async (request: Request, response: Response) => {
+      const body = await response.arrayBuffer()
+      store.set(request.url, {
+        url: request.url,
+        bytes: body.byteLength,
+        body,
+        assetUrl: response.headers.get('x-lil-tart-asset-url')!,
+        base: response.headers.get('x-lil-tart-base') ?? undefined,
+        path: response.headers.get('x-lil-tart-asset-path') ?? undefined,
+      })
     },
     delete: async (request: Request) => store.delete(request.url),
   }
@@ -66,6 +74,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   delete (globalThis as { caches?: unknown }).caches
   delete (globalThis as { document?: unknown }).document
 })
@@ -78,13 +87,14 @@ describe('listStoredModels', () => {
         url: cacheKeyUrl(modelId, `${HF}litert-community/encoder/resolve/main/model.tflite`),
         bytes: 500,
         assetUrl: `${HF}litert-community/encoder/resolve/main/model.tflite`,
+        path: 'litert-community/encoder/resolve/main/model.tflite',
       },
       {
-        // Written before the base moved to Hugging Face. Keyed on the app origin,
-        // so the resolver can never read it again.
+        // A copy keyed on the old app origin is unreachable from the HF base.
         url: cacheKeyUrl(modelId, 'https://app.test/litert-community/encoder/resolve/main/model.tflite'),
         bytes: 500,
         assetUrl: 'https://app.test/litert-community/encoder/resolve/main/model.tflite',
+        path: 'litert-community/encoder/resolve/main/model.tflite',
       },
     ])
 
@@ -100,6 +110,7 @@ describe('listStoredModels', () => {
         url: cacheKeyUrl('qwen3-tts', 'https://app.test/models/qwen3-tts/model.tflite'),
         bytes: 900,
         assetUrl: 'https://app.test/models/qwen3-tts/model.tflite',
+        path: 'models/qwen3-tts/model.tflite',
       },
     ])
 
@@ -112,6 +123,7 @@ describe('listStoredModels', () => {
         url: cacheKeyUrl('model', 'https://huggingface.co.evil.test/litert-community/model.tflite'),
         bytes: 100,
         assetUrl: 'https://huggingface.co.evil.test/litert-community/model.tflite',
+        path: 'litert-community/model.tflite',
       },
     ])
 
@@ -127,6 +139,7 @@ describe('listStoredModels', () => {
         url: cacheKeyUrl('model', 'https://huggingface.co/litert-community-evil/model.tflite'),
         bytes: 100,
         assetUrl: 'https://huggingface.co/litert-community-evil/model.tflite',
+        path: 'litert-community/model.tflite',
       },
     ])
 
@@ -136,12 +149,13 @@ describe('listStoredModels', () => {
     ])
   })
 
-  it('claims the base path itself and its descendants without a trailing slash', async () => {
+  it('resolves a manifest path against a base without a trailing slash', async () => {
     seed([
       {
         url: cacheKeyUrl('model', 'https://huggingface.co/litert-community/model.tflite'),
         bytes: 100,
         assetUrl: 'https://huggingface.co/litert-community/model.tflite',
+        path: 'litert-community/model.tflite',
       },
     ])
 
@@ -159,6 +173,7 @@ describe('listStoredModels', () => {
         url: cacheKeyUrl('model', 'https://host/v1/model.tflite'),
         bytes: 900,
         assetUrl: 'https://host/v1/model.tflite',
+        path: 'model.tflite',
         base: 'https://host/v1/',
       },
     ])
@@ -231,8 +246,8 @@ describe('listOrphanedModels', () => {
     const superseded = 'https://app.test/litert-community/encoder/resolve/main/model.tflite'
     const current = `${HF}litert-community/encoder/resolve/main/model.tflite`
     seed([
-      { url: cacheKeyUrl(modelId, current), bytes: 500, assetUrl: current },
-      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded },
+      { url: cacheKeyUrl(modelId, current), bytes: 500, assetUrl: current, path: 'litert-community/encoder/resolve/main/model.tflite' },
+      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded, path: 'litert-community/encoder/resolve/main/model.tflite' },
     ])
 
     expect(await listStoredModels(HF)).toEqual([{ modelId, bytes: 500, assets: 1 }])
@@ -253,9 +268,9 @@ describe('pruneSupersededModelCaches', () => {
     const superseded = 'https://app.test/litert-community/encoder/resolve/main/model.tflite'
     const current = `${HF}litert-community/encoder/resolve/main/model.tflite`
     seed([
-      { url: cacheKeyUrl(target, superseded), bytes: 500, assetUrl: superseded },
-      { url: cacheKeyUrl(target, current), bytes: 500, assetUrl: current },
-      { url: cacheKeyUrl(other, superseded), bytes: 700, assetUrl: superseded },
+      { url: cacheKeyUrl(target, superseded), bytes: 500, assetUrl: superseded, path: 'litert-community/encoder/resolve/main/model.tflite' },
+      { url: cacheKeyUrl(target, current), bytes: 500, assetUrl: current, path: 'litert-community/encoder/resolve/main/model.tflite' },
+      { url: cacheKeyUrl(other, superseded), bytes: 700, assetUrl: superseded, path: 'litert-community/encoder/resolve/main/model.tflite' },
     ])
 
     expect(await pruneSupersededModelCaches(target, HF)).toBe(1)
@@ -275,8 +290,8 @@ describe('base-scoped removal', () => {
 
   function seedBothBases() {
     seed([
-      { url: cacheKeyUrl(modelId, current), bytes: 500, assetUrl: current },
-      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded },
+      { url: cacheKeyUrl(modelId, current), bytes: 500, assetUrl: current, path: 'litert-community/encoder/resolve/main/model.tflite' },
+      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded, path: 'litert-community/encoder/resolve/main/model.tflite' },
     ])
   }
 
@@ -300,12 +315,93 @@ describe('base-scoped removal', () => {
 
   it('never removes another model that shares the superseded base', async () => {
     seed([
-      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded },
-      { url: cacheKeyUrl('qwen3-tts', superseded), bytes: 700, assetUrl: superseded },
+      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded, path: 'litert-community/encoder/resolve/main/model.tflite' },
+      { url: cacheKeyUrl('qwen3-tts', superseded), bytes: 700, assetUrl: superseded, path: 'litert-community/encoder/resolve/main/model.tflite' },
     ])
 
     await removeOrphanedModel(modelId, HF)
 
     expect(await listOrphanedModels(HF)).toEqual([{ modelId: 'qwen3-tts', bytes: 700, assets: 1 }])
+  })
+})
+
+
+describe('resolved asset membership', () => {
+  it.each([
+    ['absolute path', 'https://cdn.test/model.tflite', 'https://old.test/', 'https://new.test/', 'https://cdn.test/model.tflite'],
+    ['root-relative path', '/model.tflite', 'https://host/v1/', 'https://host/v2/', 'https://host/model.tflite'],
+    ['equivalent base URLs', 'litert-community/model.tflite', HF, `${HF}litert-community`, `${HF}litert-community/model.tflite`],
+  ])('preserves a live %s across listing, orphan removal and pruning', async (_name, path, base, currentBase, assetUrl) => {
+    seed([{ url: cacheKeyUrl('membership', assetUrl), bytes: 100, assetUrl, base, path }])
+    expect(await listStoredModels(currentBase)).toEqual([{ modelId: 'membership', bytes: 100, assets: 1 }])
+    expect(await listOrphanedModels(currentBase)).toEqual([])
+    expect(await pruneSupersededModelCaches('membership', currentBase)).toBe(0)
+    await removeOrphanedModel('membership', currentBase)
+    expect(store.size).toBe(1)
+    await removeStoredModel('membership', currentBase)
+    expect(store.size).toBe(0)
+  })
+
+  it('prunes the same nested-base orphan that listing reports, without touching the live copy', async () => {
+    seed([
+      { url: cacheKeyUrl('membership', 'https://host/v1/model.tflite'), bytes: 100, assetUrl: 'https://host/v1/model.tflite', base: 'https://host/v1/', path: 'model.tflite' },
+      { url: cacheKeyUrl('membership', 'https://host/model.tflite'), bytes: 200, assetUrl: 'https://host/model.tflite', base: 'https://host/', path: 'model.tflite' },
+    ])
+    expect(await listOrphanedModels('https://host/')).toEqual([{ modelId: 'membership', bytes: 100, assets: 1 }])
+    expect(await pruneSupersededModelCaches('membership', 'https://host/')).toBe(1)
+    expect(await listStoredModels('https://host/')).toEqual([{ modelId: 'membership', bytes: 200, assets: 1 }])
+  })
+
+  it('recovers legacy membership from registered original paths', async () => {
+    const path = 'https://cdn.test/legacy.tflite'
+    registerModelAssets('legacy-absolute', [path])
+    seed([{ url: cacheKeyUrl('legacy-absolute', path), bytes: 100, assetUrl: path, base: 'https://old.test/' }])
+    expect(await listOrphanedModels('https://new.test/')).toEqual([])
+    await removeOrphanedModel('legacy-absolute', 'https://new.test/')
+    expect(await pruneSupersededModelCaches('legacy-absolute', 'https://new.test/')).toBe(0)
+    expect(store.size).toBe(1)
+  })
+
+  it('does not delete anything when the current base is invalid', async () => {
+    const assetUrl = `${HF}model.tflite`
+    seed([{ url: cacheKeyUrl('invalid-base', assetUrl), bytes: 100, assetUrl, base: HF, path: 'model.tflite' }])
+    expect(await listOrphanedModels('http://[')).toEqual([
+      { modelId: 'invalid-base', bytes: 100, assets: 1, unverified: true },
+    ])
+    await removeOrphanedModel('invalid-base', 'http://[')
+    await removeStoredModel('invalid-base', 'http://[')
+    expect(await pruneSupersededModelCaches('invalid-base', 'http://[')).toBe(0)
+    expect(store.size).toBe(1)
+  })
+})
+
+
+describe('legacy cache safety and resolver metadata', () => {
+  it.each([undefined, 'https://old.test/'])('retains unidentified legacy bytes (recorded base: %s)', async (base) => {
+    const assetUrl = 'https://cdn.test/unknown.tflite'
+    seed([{ url: cacheKeyUrl('unknown-legacy', assetUrl), bytes: 100, assetUrl, base }])
+    expect(await listStoredModels(HF)).toEqual([])
+    expect(await listOrphanedModels(HF)).toEqual([
+      { modelId: 'unknown-legacy', bytes: 100, assets: 1, unverified: true },
+    ])
+    await removeOrphanedModel('unknown-legacy', HF)
+    await removeStoredModel('unknown-legacy', HF)
+    expect(await pruneSupersededModelCaches('unknown-legacy', HF)).toBe(0)
+    expect(store.size).toBe(1)
+  })
+
+  it('records original paths and reuses the cached bytes across equivalent resolver bases', async () => {
+    const asset = { id: 'model', path: 'litert-community/roundtrip.tflite' }
+    registerModelAssets('roundtrip', [asset.path])
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2, 3])))
+    vi.stubGlobal('fetch', fetchMock)
+    const first = await createModelLibraryAssetResolver(HF).resolve(asset)
+    expect([...store.values()][0].path).toBe(asset.path)
+    const second = await createModelLibraryAssetResolver(`${HF}litert-community`).resolve(asset)
+    expect(new Uint8Array(second)).toEqual(new Uint8Array(first))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(await listStoredModels(`${HF}litert-community`)).toEqual([
+      { modelId: 'roundtrip', bytes: 3, assets: 1 },
+    ])
   })
 })

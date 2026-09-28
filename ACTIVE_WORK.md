@@ -1,6 +1,60 @@
 <!-- meristem-template:v1 -->
 # Active Work
 
+## Current follow-up — 2026-09-28, integrated onto `2200684`
+
+This section supersedes the historical working-tree/status notes below. The
+remote PR #10 branch was checked again and still pointed to `a3dfeb4`. Its Vercel
+comment reported Ready at 07:48 UTC, newer than the 05:27 snapshot in the task.
+The user subsequently authorized committing and pushing. Before delivery, the
+remote advanced to `2200684` via `632ba43`; the follow-up is rebased on those
+commits, preserving their caller-signal cancellation checks and probe metadata.
+Final combined validation and delivery are recorded in the follow-up report.
+
+- The original four-item review was already addressed in `c4a606e`: scoped
+  removal, pruning documentation, cancellable streamed checkpoint fetch, and the
+  public options re-export. Preserve those changes and the scoring export.
+- New patch: cache membership uses the original asset path resolved against the
+  current base. All listing/deletion/pruning paths share that predicate. Legacy
+  entries are recovered from registered paths or a matching recorded base;
+  otherwise they remain visible as **unverified** and are never scoped-deleted or
+  automatically pruned. This replaces the historical prefix/base-only rules.
+- New patch: late tokenizer results remain local until load succeeds; disposed
+  pipelines reject later loads and stay disposed after in-flight inference.
+  Text disposal attempts both native cleanups, reports failures, and preserves
+  cancellation with the cleanup error as its cause for late engines.
+- Text checkpoints still bypass Cache Storage to retain real response streaming.
+  The LFM UI now states this explicitly and never presents text weights as a
+  model-library cache hit. A streaming persistent-cache implementation remains
+  separate work; no full checkpoint buffering was introduced.
+- 20 added regression cases; 75 initial focused tests pass. After integrating
+  the newer commits, 144 focused tests across 26 files pass. The first 16 new failure
+  cases were demonstrated against the unchanged production baseline.
+- Final combined `pnpm verify`: exit 0 (typecheck, 355 package/example tests, 15 boundary
+  tests, 10 compatibility packages, 65 qualification tests, and builds).
+  Fresh browser qualification is blocked by a missing Chromium executable and
+  failed browser downloads; historical browser results are not a fresh pass.
+- Subsequent pasted review: the qualification probe now calls production
+  `resolve()` with progress-triggered abort, not unused `stream()`. Its fixture and
+  HTTP server are created only when the case invokes the probe; imports/help and
+  unrelated cases are side-effect free. Missing/read-failed files are handled,
+  partial startup closes all acquired resources, and the ignore contract checks
+  Git itself. The unused case re-export is removed.
+- Qualification coverage is now 65 tests across 22 files, including 11 new cases.
+  Real Node HTTP checks pass and a lost-signal negative control consumes all
+  24 MiB and fails as intended. A fresh browser attempt remains blocked by the
+  missing Chromium executable, but exits without leaking a server.
+- The old Chromium observation exercised only `stream()`; it must not be cited as
+  proof of the corrected production resolver or complete pipeline cancellation.
+- Detailed validation and remaining limitations:
+  `docs/verification/2026-09-28-pr10-followup.md`.
+
+## Historical notes through `a3dfeb4`
+
+Retained for decision history. Statements below about dirty state, branch distance,
+uncancellable transfers, prefix/base-only cache classification, and old verification
+counts describe earlier stages and are not the current status.
+
 Subject: `fix/consumer-runtime-integration` — downstream consumer hardening and
 the retrieval scoring entrypoint.
 

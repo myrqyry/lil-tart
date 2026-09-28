@@ -1,74 +1,69 @@
 # Model load cancellation
 
-This record covers the cancellation evidence for the shared model-loading path:
-the pipelines resolve a repo-relative manifest path against a configured model
-base, and the runtime that consumes those bytes cannot be cancelled once it
-starts compiling. Cancellation therefore has to be proven at the transfer, and
-until this case existed it had only been asserted against stubbed `fetch`.
+## Current scope
 
-## Case
+`pipeline-load-cancellation` now exercises `createHttpAssetResolver.resolve()`,
+the buffered entrypoint used by `runtime-litert` to retrieve model bytes. Its
+`onProgress` callback aborts after the first nonzero progress event. A pass requires
+that the promise rejects with `CANCELLED` and that consumed bytes are greater than
+zero but less than the 24 MiB fixture. Successful resolution, a different error,
+zero received bytes, or consuming the entire fixture all fail the case.
 
-`pipeline-load-cancellation` in `tests/runtime-qualification/` streams a real
-local asset through the shared `createHttpAssetResolver` in headless Chromium
-and cancels it, then observes two things:
+The browser entry delegates to `pipeline-load-cancellation/probeTransfer.ts`.
+This measures bytes consumed by the resolver, not all bytes already sent by the
+server or buffered by the network stack. It does not compile a model or exercise
+a pipeline's signal wiring end to end.
 
-- the transfer stops well short of the full asset, and
-- the resolver surfaces a cancellation (`InferenceError` with code `CANCELLED`).
+## Fixture and server lifecycle
 
-The asset is 24 MiB, generated deterministically under the gitignored
-`static-models/` directory rather than committed, so the case needs no
-multi-megabyte fixture in the repository. It is served from a separate origin on
-its own port, with CORS enabled, because a real model base is a different origin
-from the app and the browser must apply the same cross-origin rules it would
-against Hugging Face.
+The deterministic fixture lives under gitignored `static-models/`. Importing the
+CLI, printing help, launching an unrelated case, or failing browser startup does
+not generate it or start the probe server. Generation and the separate-origin
+server start only when the cancellation case invokes its probe. The fixture path
+is anchored to the generator module rather than the working directory.
 
-It probes `AssetResolver.resolve()`, not `stream()`. Every model load in this
-repository reaches the resolver through `runtime-litert`'s buffered whole-body
-branch; `stream()` has no production caller, so a case built on it would
-instrument a door nobody walks through.
+The server validates the file before binding and handles read errors, including a
+file disappearing after setup. Such failures become a failed case or HTTP error,
+not an uncaught HTTP-listener exception. Vite, browser, context, and probe server
+are closed after partial startup and after runs; one rejected close does not skip
+the others.
 
-The cancel fires on the first byte that actually moves, not on a timer. A local
-origin can deliver a whole buffered body in a few milliseconds, so a fixed delay
-lets the transfer finish before any abort lands and the probe proves nothing.
-That was observed: an earlier timer-based version reported the full 25,165,824
-bytes and failed.
+The VCS contract now runs `git check-ignore --no-index` against the actual probe
+path. Removing its ignore rule makes the test fail. The unused re-export from
+`case.ts` was removed; browser-safe constants remain in `probeAsset.meta.ts`.
 
-The size is load-bearing. "Fewer bytes arrived than the asset holds" is only
-meaningful if the asset cannot arrive in a single chunk, so `contract.test.ts`
-asserts the size floor independently of the browser observation.
+## Fresh evidence for this follow-up
 
-## Observed
+- Real local HTTP, Node fetch, and the production resolver: cancellation passes.
+- A negative control drops the fetch AbortSignal: the full 25,165,824 bytes are
+  consumed, and the probe reports failure. This guards against a false green.
+- The test additionally requires `resolve()` and rejects any `stream()` call.
+- Missing file setup rejects normally; deletion after setup returns HTTP 500.
+- Startup/cleanup tests cover failed listen, browser launch and context creation,
+  unused case selection, failed fixture setup, and cleanup rejection.
+- Four new CLI/lifecycle regressions failed against the original implementation
+  before edits and passed after the fix.
+- A browser attempt still fails because the Playwright Chromium executable is
+  absent. The updated launcher exits cleanly instead of leaking its Vite listener.
+  No fresh browser pass is claimed.
 
-Run locally against Chromium 151.0.7922.34, requested backend WASM, wasm
-runtime `@litertjs/core` 2.5.3, using the `run-qualification` runner:
+## Historical browser observation (superseded path)
 
-```text
-pipeline-load-cancellation	wasm	pass	match
-```
+The earlier record reported a Chromium 151.0.7922.34 pass and a negative control
+that consumed the complete 24 MiB. That probe called `resolver.stream()`, which
+has no current production consumer for this model-loading path. It proved only
+that unused entrypoint's cancellation; it did **not** close the production
+`resolve()` or pipeline evidence gap. Those results must not be relabelled as
+observations of the corrected probe.
 
-## Falsifiability
+## Remaining boundaries
 
-A passing case is only worth recording if it can fail. Stopping the signal from
-reaching the resolver reproduces the original defect exactly:
+The current text-generation pipeline fetches with a signal and supplies a response
+body to `Engine.create`; it does not use this resolver path when a model base is
+configured. Consuming a real `.litertlm` stream and generating text remain separate
+browser checks. Tokenizer requests in encoder/ColBERT still have no upstream abort
+option. Fresh browser evidence for the corrected resolver probe is also pending.
 
-```text
-pipeline-load-cancellation	wasm	fail	mismatch
-abort did not stop the transfer: 25165824 of 25165824 bytes, cancellation code null
-```
-
-The full 24 MiB arrives when nothing aborts the transfer, which is the zombie
-download this case exists to rule out. The passing run was re-confirmed after
-reverting the mutation.
-
-## What this does not prove
-
-- It does not exercise `Engine.create` consuming a streamed body. That needs a
-  real `.litertlm` checkpoint, which this case deliberately avoids, so the
-  text-generation path still has no browser evidence for the engine half of the
-  change. Note that production text generation hands the engine an absolute URL
-  and the engine fetches it with no signal, so that path is not cancellable at
-  all; only the resolver-backed pipelines are covered here.
-- Tokenizer loads in the encoder and ColBERT pipelines are still not
-  cancellable; `AutoTokenizer.from_pretrained` exposes no signal upstream.
-- Results JSON is gitignored, so this file is the durable record. Re-run
-  `pnpm qualify -- --case pipeline-load-cancellation` to regenerate it.
+Re-run with `pnpm qualify -- --case pipeline-load-cancellation --backend wasm`.
+Results JSON is gitignored; this document distinguishes historical browser evidence
+from the current Node/contract checks.

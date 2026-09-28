@@ -15,11 +15,10 @@ import type { ModelAssetDescriptor } from '../schema/types'
 import { captureBrowserEnvironment } from './environment'
 import { runQualificationMatrix } from './matrix'
 import { createServer, type ViteDevServer } from 'vite'
-import { createReadStream, statSync } from 'node:fs'
-import { createServer as createNodeServer } from 'node:http'
-import { join } from 'node:path'
 import { createQualificationTypedArray, serializeQualificationInput } from './tensorBridge'
-import { ABORT_PROBE_PATH } from '../pipeline-load-cancellation/probeAsset.meta'
+import { ensureAbortProbeAsset } from '../pipeline-load-cancellation/probeAsset'
+import { createProbeAssetServer } from './probeAssetServer'
+import type { Browser, BrowserContext } from 'playwright'
 
 interface BrowserRuntimeApi {
   initialize(path: string): Promise<void>
@@ -163,17 +162,16 @@ function createContext(
 function createPlaywrightLauncher(): BrowserLauncher {
   return async (options, run) => {
     const playwright = await import('playwright')
-    const server = await createQualificationServer()
-    const browserType = playwright[options.browserName]
-    const browser = await browserType.launch({ headless: options.headless })
-    const context = await browser.newContext()
-    // Inside the try so the existing finally always closes it, and only when a selected
-    // case actually declares the dependency.
-    let probeServer: { origin: string; close(): Promise<void> } | null = null
+    let server: ViteDevServer | undefined
+    let probeServer: Awaited<ReturnType<typeof createProbeAssetServer>> | undefined
+    let browser: Browser | undefined
+    let context: BrowserContext | undefined
+    let failed = false
     try {
-      if (options.requiresProbeAsset) {
-        probeServer = await createProbeAssetServer(join(process.cwd(), ABORT_PROBE_PATH))
-      }
+      server = await createServer({ root: process.cwd(), server: { port: 0 } })
+      await server.listen()
+      browser = await playwright[options.browserName].launch({ headless: options.headless })
+      context = await browser.newContext()
       const page = await context.newPage()
       const baseUrl = server.resolvedUrls?.local[0]
       if (!baseUrl) throw new Error('Qualification server did not expose a local URL')
@@ -246,12 +244,11 @@ function createPlaywrightLauncher(): BrowserLauncher {
       const runtime = {
         initialize: () => page.evaluate((path) => window.litertQualification.initialize(path), '/node_modules/@litertjs/core/wasm'),
         runModuleWorkerLoader: () => page.evaluate(() => window.litertQualification.runModuleWorkerLoader()),
-        probeAbortStopsTransfer: () => {
-          if (!probeServer) throw new Error('Probe asset server was not started for this run')
-          return page.evaluate(
-            (origin) => window.litertQualification.probeAbortStopsTransfer(origin),
-            probeServer.origin,
-          )
+        probeAbortStopsTransfer: async () => {
+          if (!options.requiresProbeAsset) throw new Error('No selected case declared a probe asset')
+          // No fixture or second listener until the selected case actually probes.
+          probeServer ??= await createProbeAssetServer(ensureAbortProbeAsset())
+          return page.evaluate((origin) => window.litertQualification.probeAbortStopsTransfer(origin), probeServer.origin)
         },
         loadAndCompile: async (model: Uint8Array, compileOptions: { accelerator: QualificationBackend }) => {
           const result = await page.evaluate(async ({ model, accelerator }) => window.litertQualification.loadAndCompile(model, accelerator), {
@@ -280,51 +277,17 @@ function createPlaywrightLauncher(): BrowserLauncher {
         return new Uint8Array(bytes).buffer
       }
       return await run(capabilities, runtime, fetchAsset)
+    } catch (error) {
+      failed = true
+      throw error
     } finally {
-      await context.close()
-      await browser.close()
-      await server.close()
-      await probeServer?.close()
+      // Attempt every close, including resources acquired before a startup failure.
+      // Preserve the original error if the run itself failed.
+      const errors: unknown[] = []
+      for (const resource of [context, browser, probeServer, server]) {
+        try { await resource?.close() } catch (error) { errors.push(error) }
+      }
+      if (!failed && errors.length > 0) throw errors[0]
     }
   }
-}
-
-async function createQualificationServer(): Promise<ViteDevServer> {
-  const server = await createServer({ root: process.cwd(), server: { port: 0 } })
-  await server.listen()
-  return server
-}
-
-// A separate origin for the abort probe, on purpose: the real model base is a different
-// origin from the app (Hugging Face), so cancellation has to hold cross-origin. Served
-// from its own port rather than the Vite dev server, which does not expose arbitrary
-// files from the project root.
-function createProbeAssetServer(file: string): Promise<{ origin: string; close(): Promise<void> }> {
-  // Resolve the size once, up front. A statSync inside the request handler would throw
-  // synchronously in a Node HTTP callback, which is not caught, so a missing fixture
-  // would take the whole run down instead of failing one case.
-  const size = statSync(file).size
-  const server = createNodeServer((req, res) => {
-    if (!req.url?.startsWith('/asset')) {
-      res.statusCode = 404
-      res.end()
-      return
-    }
-    // Cross-origin on purpose, matching a real model base, so the browser applies CORS
-    // exactly as it would against Hugging Face.
-    res.setHeader('Access-Control-Allow-Origin', '*')
-    res.setHeader('Content-Type', 'application/octet-stream')
-    res.setHeader('Content-Length', String(size))
-    createReadStream(file).pipe(res)
-  })
-  return new Promise((resolvePromise) => {
-    server.listen(0, '127.0.0.1', () => {
-      const address = server.address()
-      const port = typeof address === 'object' && address ? address.port : 0
-      resolvePromise({
-        origin: `http://127.0.0.1:${port}`,
-        close: () => new Promise<void>((done) => server.close(() => done())),
-      })
-    })
-  })
 }

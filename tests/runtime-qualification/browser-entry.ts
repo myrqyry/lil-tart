@@ -1,7 +1,6 @@
 import { loadAndCompile, loadLiteRt, setWebGpuDevice, Tensor } from '@litertjs/core'
 import { createLiteRtRuntime } from '../../packages/runtime-litert/src/context'
-import { createHttpAssetResolver } from '../../packages/inference-core/src/assets/http-resolver'
-import { ABORT_PROBE_BYTES } from './pipeline-load-cancellation/probeAsset.meta'
+import { probeAbortStopsTransfer } from './pipeline-load-cancellation/probeTransfer'
 import { GeneratorPhase } from '../../packages/qwen3-tts/src/phases/generator'
 import {
   createQualificationTypedArray,
@@ -66,82 +65,8 @@ Object.assign(window, {
       const verified = await verifyQualificationAsset(buffer, descriptor)
       return Array.from(new Uint8Array(verified))
     },
-    // Probes the path production actually takes. Every model load in this repository
-    // reaches the resolver through runtime-litert's resolve() -> assets.resolve(), the
-    // buffered whole-body branch; AssetResolver.stream() currently has no production
-    // caller, so probing it alone would instrument a door nobody walks through.
-    async probeAbortStopsTransfer(origin: string) {
-      const url = new URL('/asset', origin)
-      const resolver = createHttpAssetResolver(url.origin)
-      const controller = new AbortController()
-      const asset = { id: 'abort-probe.bin', path: 'asset' }
-
-      let loadedBytes = 0
-      let settled = false
-      let signalFirstByte: () => void = () => {}
-      const firstByte = new Promise<void>((resolveByte) => {
-        signalFirstByte = resolveByte
-      })
-      const transferred = resolver
-        .resolve(asset, {
-          signal: controller.signal,
-          onProgress: (progress) => {
-            loadedBytes = progress.loadedBytes
-            signalFirstByte()
-          },
-        })
-        .then(
-          () => {
-            settled = true
-            signalFirstByte()
-            return null
-          },
-          (error: unknown) => {
-            settled = true
-            signalFirstByte()
-            return error
-          },
-        )
-
-      // Cancel on the first byte that actually moves, not on a timer. A local origin can
-      // deliver a whole buffered body in a few milliseconds, so a fixed delay would let
-      // the transfer finish before any abort could land and the probe would prove
-      // nothing. This is also the real scenario: a user switching models mid-download.
-      await Promise.race([
-        firstByte,
-        new Promise((resolveTick) => setTimeout(resolveTick, 10_000)),
-      ])
-      if (settled) {
-        return {
-          status: 'fail' as const,
-          stage: 'probe',
-          error: { message: 'the asset completed before any abort could be observed' },
-        }
-      }
-
-      const bytesAtAbort = loadedBytes
-      controller.abort()
-      const error = await transferred
-
-      const code = (error as { code?: string } | null)?.code ?? null
-      if (bytesAtAbort <= 0 || bytesAtAbort >= ABORT_PROBE_BYTES) {
-        return {
-          status: 'fail' as const,
-          stage: 'probe',
-          error: {
-            message: `abort did not stop the transfer: ${bytesAtAbort} of ${ABORT_PROBE_BYTES} bytes`,
-          },
-        }
-      }
-      if (code !== 'CANCELLED') {
-        return {
-          status: 'fail' as const,
-          stage: 'probe',
-          error: { message: `expected CANCELLED, observed ${String(code)}` },
-        }
-      }
-      return { status: 'pass' as const }
-    },
+    // Exercise the buffered resolver used by runtime-litert model loading.
+    probeAbortStopsTransfer,
     runModuleWorkerLoader() {
       const worker = new Worker(
         new URL('./module-worker-loader/worker.ts', import.meta.url),

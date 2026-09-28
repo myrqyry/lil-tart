@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix(playground)`: replace 12 empty adapters (`sam2` ×2, `vision` ×10 including `6drepnet`, `blaze-face`, `yolox`, `u2net`, `edsr`, `migan`, `style-*`) with working `prepareInputs`/`parseOutputs` (`apps/playground/src/adapters/sam2.ts:16`, `apps/playground/src/adapters/vision.ts:70`)
 
 ### Fixed
+- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: preserve caller-signal cancellation checks from `2200684` when combining late-result and disposal cleanup fixes
 - `encoder` and `retrieval` now keep `inference-core` as a peer contract instead of leaking `workspace:*` into downstream package metadata.
 - `fix(playground)`: resolve LFM pipeline model assets from Hugging Face instead of the app origin, so packaged consumers load the same weights as the app
 - `fix(text-gen)`: resolve the LiteRT-LM model to an absolute URL from an explicit model base instead of handing the repo-relative manifest path to the engine, which resolved it against the app origin and 404'd
@@ -29,11 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix(playground)`: scope model-cache removal to a base, so reclaiming a previous-base download no longer also deletes the live copy of a model that is cached under both
 - `fix(text-gen)`: export `LiteRtLmTextPipelineOptions` from the package entrypoint so consumers can name the type of the constructor option they pass
 - `fix(playground)`: match cache entries against the model base structurally, so a base without a trailing slash no longer claims sibling paths that share its leading characters
-- `fix(playground)`: decide cached-asset membership from the base an entry was written with, so widening a nested base (`/v1/` to `/`) stops reporting unreachable bytes as stored. Entries predating the recorded base still fall back to the prefix comparison
+- `fix(playground)`: determine cached-asset membership from the original asset path resolved against the current base. Listing, removal and pruning share this rule, preserving absolute/root-relative paths and URL-equivalent bases while excluding unreachable nested-base copies. Legacy entries without enough metadata stay visible as unverified and are protected from scoped deletion and pruning
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a dispose that lands while the engine or model is still compiling no longer lets the late result resurrect a disposed pipeline. text generation releases the orphaned engine explicitly
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a load that is cancelled because the pipeline was disposed now reports `disposed` rather than stamping `idle` over it, and a load abandoned by disposal rejects instead of resolving as if it succeeded
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: an already-aborted context signal now stops a load immediately. Subscribing to a settled signal never fires, so a caller that cancelled before dialling would otherwise start a full checkpoint download
-- `fix(playground)`: reject loads attempted on a disposed pipeline, and stop a tokenizer fetch that completes after disposal from repopulating pipeline state
+- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: reject loads attempted on a disposed pipeline, prevent late tokenizers from repopulating state, and preserve disposed status when in-flight inference finishes
+- `fix(text-gen)`: attempt both conversation and engine cleanup on disposal even if either fails; preserve cancellation errors with a cleanup cause when releasing a late engine
+- `fix(playground)`: explicitly label streamed text weights as not saved in the model library, and clear stale stored-model information on selection changes
 - `test`: the LFM cancellation guard asserted an offset comparison that could not fail, since a missing needle yields -1 and -1 sorts before any real index. It now asserts both offsets exist, and is bounded to the dispose function
 - `fix(retrieval)`: remove unused retrieval state that broke stricter downstream TypeScript consumers
 - `fix`: cache LiteRT runtime in `ensureRuntime` and persist Ready badge (`packages/runtime-litert/src/context.ts:90`, `packages/runtime-litert/src/types.ts:96`)
@@ -41,10 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix`: terminate TTS workers on failure and probe WASM features honestly
 
 ### Verification
-- Add a `pipeline-load-cancellation` runtime qualification case that streams a real cross-origin asset through the shared asset resolver in headless Chromium and observes that cancelling stops the transfer, closing the cancellation evidence gap that only stubbed `fetch` had covered. It probes `AssetResolver.resolve()`, the path production loading actually takes, since `stream()` has no production caller. Durable record in `docs/verification/2026-09-28-model-load-cancellation.md`
-- `fix(playground)`: decide cached-asset membership by whether the current base resolves the entry's recorded path to its stored URL. Base-string equality was wrong in both directions: too strict for a base whose last segment is a file, which made live entries look orphaned and removable
-- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a load attempted after disposal now rejects instead of resolving, so a caller cannot mistake a disposed pipeline for a ready one
-- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a cancelled load no longer completes. Cancellation had two routes, disposal and an aborted context signal, but only disposal was checked before publishing a result, so a caller that cancelled while the engine was still compiling ended up with a live engine and a pipeline reporting itself ready
+- Correct the `pipeline-load-cancellation` probe to call production `resolve()` with progress-triggered abort; its prior browser observation covered only the unused `stream()` entrypoint. Add real HTTP positive/negative checks and startup/cleanup regressions. Generate the fixture and open its server lazily, handle missing/read-failed assets, and check the actual Git ignore rule. Browser evidence for the corrected probe remains pending; see `docs/verification/2026-09-28-model-load-cancellation.md`
 
 ### Docs
 - Canonical Git dependency examples now use the renamed `myrqyry/lil-tart` repository while preserving the stable `@litert-playground/*` package namespace.

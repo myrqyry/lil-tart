@@ -18,7 +18,7 @@ export async function runPipelineLoadCancellation(
 export const pipelineLoadCancellationCase: QualificationCase = {
   id: 'pipeline-load-cancellation',
   description:
-    'Proves that aborting a real in-flight model transfer stops the bytes, using the shared asset resolver.',
+    'Proves that aborting a real in-flight model transfer stops the bytes, using the buffered asset resolver used by runtime model loading.',
   evidenceKind: 'browser-observation',
   requiresProbeAsset: true,
   environments: [

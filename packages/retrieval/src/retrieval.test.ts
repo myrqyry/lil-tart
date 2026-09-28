@@ -198,3 +198,49 @@ describe('ColBertPipeline cancellation', () => {
     expect(pipeline.status).toBe('disposed')
   })
 })
+
+
+describe('ColBertPipeline disposal boundaries', () => {
+  it('rejects loading an already disposed instance', async () => {
+    const pipeline = new ColBertPipeline()
+    await pipeline.dispose()
+    const loadModel = vi.fn()
+    await expect(pipeline.load({ liteRt: { loadModel } } as never)).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(loadModel).not.toHaveBeenCalled()
+    expect(pipeline.status).toBe('disposed')
+  })
+
+  it('does not retain a tokenizer that finishes after disposal', async () => {
+    const { AutoTokenizer } = await import('@huggingface/transformers')
+    let release!: (value: unknown) => void
+    const pending = new Promise(resolve => { release = resolve })
+    vi.mocked(AutoTokenizer.from_pretrained).mockReturnValueOnce(pending as never)
+    const pipeline = new ColBertPipeline()
+    const loadModel = vi.fn()
+    const loading = pipeline.load({ liteRt: { loadModel } } as never)
+    await waitFor(() => vi.mocked(AutoTokenizer.from_pretrained).mock.results.some(r => r.value === pending), 'tokenizer to start')
+    await pipeline.dispose()
+    release({ encode: vi.fn() })
+    await expect(loading).rejects.toMatchObject({ code: 'CANCELLED' })
+    expect(loadModel).not.toHaveBeenCalled()
+    // Retention is the defect: status alone cannot detect this leak.
+    expect(pipeline).toHaveProperty('tokenizer', null)
+    expect(pipeline.status).toBe('disposed')
+  })
+
+  it('keeps disposed status when an in-flight inference finishes', async () => {
+    let release!: () => void
+    const run = vi.fn(() => new Promise(resolve => {
+      release = () => resolve([{ data: async () => new Float32Array([1, 2]) }])
+    }))
+    const pipeline = new ColBertPipeline()
+    await pipeline.load({ liteRt: { loadModel: async () => ({ run }) } } as never)
+    const running = pipeline.run({ text: 'hello' }, { maxTokens: 1 })
+    await waitFor(() => run.mock.calls.length > 0, 'inference to start')
+    await pipeline.dispose()
+    release()
+    await running
+    expect(pipeline.status).toBe('disposed')
+    await expect(pipeline.load({} as never)).rejects.toMatchObject({ code: 'CANCELLED' })
+  })
+})

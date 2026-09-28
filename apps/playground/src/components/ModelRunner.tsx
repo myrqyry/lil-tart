@@ -218,7 +218,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
             </p>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-1.5">
-            {storedModels.length > 0 && (
+            {(storedModels.length > 0 || orphanedModels.length > 0) && (
               <div className="flex items-center gap-1 text-xs text-on-surface-variant">
                 <span>{storedModels.length} downloaded · {formatBytes(storedBytes)}</span>
                 <button
@@ -227,7 +227,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   disabled={storageBusy || loading}
                   className="rounded-md px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
                 >
-                  Clear
+                  Clear all
                 </button>
               </div>
             )}
@@ -235,18 +235,18 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
             {orphanedModels.length > 0 && (
               <div className="flex items-center gap-1 text-xs text-on-surface-variant">
                 <span>
-                  {orphanedModels.length} under a previous base · {formatBytes(orphanedBytes)}
+                  {orphanedModels.length} previous-base or unverified downloads · {formatBytes(orphanedBytes)}
                 </span>
                 {orphanedModels.map((model) => (
                   <button
                     key={model.modelId}
                     type="button"
-                    title={`Remove ${model.modelId}`}
+                    title={model.unverified ? 'Load this model to verify its older cache metadata, or use Clear all to remove all downloads.' : `Remove ${model.modelId}`}
                     onClick={() => void handleRemoveOrphaned(model.modelId)}
-                    disabled={storageBusy || loading}
+                    disabled={storageBusy || loading || model.unverified}
                     className="rounded-md px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
                   >
-                    Remove {model.modelId}
+                    {model.unverified ? 'Unverified' : 'Remove'} {model.modelId}
                   </button>
                 ))}
               </div>

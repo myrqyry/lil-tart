@@ -75,13 +75,8 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
   }
 
   async load(context: RuntimeContext): Promise<void> {
+    if (this.disposed) throw new InferenceError('CANCELLED', 'Pipeline is disposed')
     if (this.status === 'ready') return
-    // A disposed pipeline stays disposed. Reject rather than resolve: a caller that
-    // treats a resolved load as readiness would only discover the truth later, at
-    // run(), with a much less obvious error.
-    if (this.disposed) {
-      throw new InferenceError('CANCELLED', 'Pipeline was disposed and cannot load again')
-    }
     this.status = 'loading'
     this.context = context
     const start = performance.now()
@@ -105,8 +100,8 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
       const transformers = (await import('@huggingface/transformers')) as unknown as TransformersModule
       // ponytail: repo id is the first two path segments of any asset URL
       const repoId = this.manifest.assets[0].path.split('/').slice(0, 2).join('/')
-      this.tokenizer = await transformers.AutoTokenizer.from_pretrained(repoId)
-      // A cancellation landing during the tokenizer fetch must not repopulate state.
+      const tokenizer = await transformers.AutoTokenizer.from_pretrained(repoId)
+      // A dispose landing during the tokenizer fetch must not repopulate state.
       // Reject rather than resolve: the caller asked for a model and did not get one.
       if (cancelled()) {
         throw new InferenceError('CANCELLED', 'Model load was cancelled')
@@ -119,6 +114,7 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
       if (cancelled()) {
         throw new InferenceError('CANCELLED', 'Model load was cancelled')
       }
+      this.tokenizer = tokenizer
       this.model = model
       this.report({ phase: 'ready', step: 3, total: 3 })
       this.loadMs = performance.now() - start
@@ -165,7 +161,7 @@ export class EncoderPipeline implements Pipeline<EncoderInput, EncoderResult, En
         scores: floats,
       }
     } finally {
-      this.status = 'ready'
+      this.status = this.disposed ? 'disposed' : 'ready'
     }
   }
 

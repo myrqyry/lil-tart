@@ -179,8 +179,9 @@ async function readStream(
 
 // ponytail: manifest asset paths are repo-relative. Handing one to the engine raw lets the
 // browser resolve it against the app origin, which 404s, so the caller supplies the model
-// base and the path is made absolute. The engine then fetches and streams the checkpoint
-// itself. Deliberately NOT routed through context.assets.stream(): resolvers in this repo
+// base and the path is made absolute. The pipeline fetches with an abort signal
+// and passes the response body to the engine. Deliberately not routed through
+// context.assets.stream(): resolvers in this repo
 // materialize the whole checkpoint into an ArrayBuffer before wrapping it in a
 // ReadableStream, and a full buffered read is the wrong memory trade for a
 // multi-billion-parameter model in a browser.
@@ -242,13 +243,8 @@ export class LiteRtLmTextPipeline
   }
 
   async load(context: RuntimeContext): Promise<void> {
+    if (this.disposed) throw new InferenceError('CANCELLED', 'Pipeline is disposed');
     if (this.status === 'ready') return;
-    // A disposed pipeline stays disposed. Reject rather than resolve: a caller that
-    // treats a resolved load as readiness would only discover the truth later, at
-    // run(), with a much less obvious error.
-    if (this.disposed) {
-      throw new InferenceError('CANCELLED', 'Pipeline was disposed and cannot load again');
-    }
     this.status = 'loading';
     this.context = context;
     const loadStart = performance.now();
@@ -288,12 +284,16 @@ export class LiteRtLmTextPipeline
         backend,
         mainExecutorSettings: { maxNumTokens: DEFAULTS.maxContextTokens },
       });
-      // A dispose or a caller abort can land while the engine is still compiling, and
-      // aborting the fetch cannot stop that. The late result must be released, not
-      // published, or a cancelled pipeline resurrects itself and leaks the engine.
+      // Disposal or caller cancellation can land during compilation; aborting the
+      // fetch cannot stop that. The late result must be released, not published,
+      // or a cancelled pipeline publishes a live engine.
       if (cancelled()) {
-        await engine.delete();
-        throw new InferenceError('CANCELLED', 'Model load was cancelled', { asset: modelPath });
+        let cleanupError: unknown;
+        try { await engine.delete(); } catch (error) { cleanupError = error; }
+        throw new InferenceError('CANCELLED', 'Model load was cancelled', {
+          asset: modelPath,
+          cause: cleanupError,
+        });
       }
       this.engine = engine;
       this.loadMs = performance.now() - loadStart;
@@ -360,7 +360,7 @@ export class LiteRtLmTextPipeline
       if (signal?.aborted) throw new Error('CANCELLED');
       const stream = this.conversation.sendMessageStreaming(prompt);
       const { text, reasoning } = await readStream(stream, signal, cfg.onToken, cfg.onReasoning);
-      this.status = 'ready';
+      this.status = this.disposed ? 'disposed' : 'ready';
       return {
         kind: 'text',
         text,
@@ -368,7 +368,7 @@ export class LiteRtLmTextPipeline
       } satisfies TextInferenceResult;
     } catch (e) {
       this.conversation?.cancel();
-      this.status = 'ready';
+      this.status = this.disposed ? 'disposed' : 'ready';
       throw e instanceof Error ? e : new Error(String(e));
     }
   }
@@ -381,12 +381,19 @@ export class LiteRtLmTextPipeline
     this.loadAbort = null;
     // Invalidate any load still awaiting a result.
     this.loadToken += 1;
-    await this.conversation?.delete();
+    const conversation = this.conversation;
+    const engine = this.engine;
     this.conversation = null;
-    await this.engine?.delete();
     this.engine = null;
     this.context = null;
     this.status = 'disposed';
+    // Each cleanup gets an attempt even if the other rejects. Keep the terminal
+    // state truthful and propagate cleanup errors to the caller.
+    const errors: unknown[] = [];
+    try { await conversation?.delete(); } catch (error) { errors.push(error); }
+    try { await engine?.delete(); } catch (error) { errors.push(error); }
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) throw Object.assign(new Error('Pipeline cleanup failed'), { errors });
   }
 
   private report(progress: PipelineProgress): void {
