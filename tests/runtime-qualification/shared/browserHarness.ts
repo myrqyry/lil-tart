@@ -74,6 +74,9 @@ declare global {
 export interface BrowserLaunchOptions {
   browserName: 'chromium' | 'firefox' | 'webkit'
   headless: boolean
+  // Set when a selected case declares it needs the generated probe asset origin, so an
+  // unrelated run never binds that port or opens that file.
+  requiresProbeAsset?: boolean
 }
 
 export interface BrowserQualificationOptions extends QualificationRunOptions {
@@ -116,7 +119,11 @@ export async function runBrowserQualification(
     )
   }
   const launcher = options.launcher ?? createPlaywrightLauncher()
-  return launcher(options.launch, async (capabilities, runtime, fetchAsset) => {
+  const launch: BrowserLaunchOptions = {
+    ...options.launch,
+    requiresProbeAsset: selectedCases.some((item) => item.requiresProbeAsset),
+  }
+  return launcher(launch, async (capabilities, runtime, fetchAsset) => {
     const contexts: QualificationContext[] = cases
       .flatMap((qualificationCase) => qualificationCase.environments)
       .filter((environment, index, environments) =>
@@ -157,12 +164,16 @@ function createPlaywrightLauncher(): BrowserLauncher {
   return async (options, run) => {
     const playwright = await import('playwright')
     const server = await createQualificationServer()
-  const probeAsset = join(process.cwd(), ABORT_PROBE_PATH)
-  const probeServer = await createProbeAssetServer(probeAsset)
     const browserType = playwright[options.browserName]
     const browser = await browserType.launch({ headless: options.headless })
     const context = await browser.newContext()
+    // Inside the try so the existing finally always closes it, and only when a selected
+    // case actually declares the dependency.
+    let probeServer: { origin: string; close(): Promise<void> } | null = null
     try {
+      if (options.requiresProbeAsset) {
+        probeServer = await createProbeAssetServer(join(process.cwd(), ABORT_PROBE_PATH))
+      }
       const page = await context.newPage()
       const baseUrl = server.resolvedUrls?.local[0]
       if (!baseUrl) throw new Error('Qualification server did not expose a local URL')
@@ -235,7 +246,13 @@ function createPlaywrightLauncher(): BrowserLauncher {
       const runtime = {
         initialize: () => page.evaluate((path) => window.litertQualification.initialize(path), '/node_modules/@litertjs/core/wasm'),
         runModuleWorkerLoader: () => page.evaluate(() => window.litertQualification.runModuleWorkerLoader()),
-        probeAbortStopsTransfer: () => page.evaluate((origin) => window.litertQualification.probeAbortStopsTransfer(origin), probeServer.origin),
+        probeAbortStopsTransfer: () => {
+          if (!probeServer) throw new Error('Probe asset server was not started for this run')
+          return page.evaluate(
+            (origin) => window.litertQualification.probeAbortStopsTransfer(origin),
+            probeServer.origin,
+          )
+        },
         loadAndCompile: async (model: Uint8Array, compileOptions: { accelerator: QualificationBackend }) => {
           const result = await page.evaluate(async ({ model, accelerator }) => window.litertQualification.loadAndCompile(model, accelerator), {
               model: Array.from(model),
@@ -267,7 +284,7 @@ function createPlaywrightLauncher(): BrowserLauncher {
       await context.close()
       await browser.close()
       await server.close()
-      await probeServer.close()
+      await probeServer?.close()
     }
   }
 }
@@ -283,6 +300,10 @@ async function createQualificationServer(): Promise<ViteDevServer> {
 // from its own port rather than the Vite dev server, which does not expose arbitrary
 // files from the project root.
 function createProbeAssetServer(file: string): Promise<{ origin: string; close(): Promise<void> }> {
+  // Resolve the size once, up front. A statSync inside the request handler would throw
+  // synchronously in a Node HTTP callback, which is not caught, so a missing fixture
+  // would take the whole run down instead of failing one case.
+  const size = statSync(file).size
   const server = createNodeServer((req, res) => {
     if (!req.url?.startsWith('/asset')) {
       res.statusCode = 404
@@ -293,7 +314,7 @@ function createProbeAssetServer(file: string): Promise<{ origin: string; close()
     // exactly as it would against Hugging Face.
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Content-Type', 'application/octet-stream')
-    res.setHeader('Content-Length', String(statSync(file).size))
+    res.setHeader('Content-Length', String(size))
     createReadStream(file).pipe(res)
   })
   return new Promise((resolvePromise) => {

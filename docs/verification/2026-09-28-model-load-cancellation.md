@@ -9,8 +9,8 @@ until this case existed it had only been asserted against stubbed `fetch`.
 ## Case
 
 `pipeline-load-cancellation` in `tests/runtime-qualification/` streams a real
-local asset through the shared `createHttpAssetResolver` in headless Chromium,
-aborts after the first chunk, and observes two things:
+local asset through the shared `createHttpAssetResolver` in headless Chromium
+and cancels it, then observes two things:
 
 - the transfer stops well short of the full asset, and
 - the resolver surfaces a cancellation (`InferenceError` with code `CANCELLED`).
@@ -21,6 +21,17 @@ multi-megabyte fixture in the repository. It is served from a separate origin on
 its own port, with CORS enabled, because a real model base is a different origin
 from the app and the browser must apply the same cross-origin rules it would
 against Hugging Face.
+
+It probes `AssetResolver.resolve()`, not `stream()`. Every model load in this
+repository reaches the resolver through `runtime-litert`'s buffered whole-body
+branch; `stream()` has no production caller, so a case built on it would
+instrument a door nobody walks through.
+
+The cancel fires on the first byte that actually moves, not on a timer. A local
+origin can deliver a whole buffered body in a few milliseconds, so a fixed delay
+lets the transfer finish before any abort lands and the probe proves nothing.
+That was observed: an earlier timer-based version reported the full 25,165,824
+bytes and failed.
 
 The size is load-bearing. "Fewer bytes arrived than the asset holds" is only
 meaningful if the asset cannot arrive in a single chunk, so `contract.test.ts`
@@ -54,7 +65,9 @@ reverting the mutation.
 - It does not exercise `Engine.create` consuming a streamed body. That needs a
   real `.litertlm` checkpoint, which this case deliberately avoids, so the
   text-generation path still has no browser evidence for the engine half of the
-  change.
+  change. Note that production text generation hands the engine an absolute URL
+  and the engine fetches it with no signal, so that path is not cancellable at
+  all; only the resolver-backed pipelines are covered here.
 - Tokenizer loads in the encoder and ColBERT pipelines are still not
   cancellable; `AutoTokenizer.from_pretrained` exposes no signal upstream.
 - Results JSON is gitignored, so this file is the durable record. Re-run

@@ -63,8 +63,12 @@ export class ColBertPipeline
 
   async load(context: RuntimeContext): Promise<void> {
     if (this.status === 'ready') return
-    // A disposed pipeline stays disposed; nothing may load through it again.
-    if (this.disposed) return
+    // A disposed pipeline stays disposed. Reject rather than resolve: a caller that
+    // treats a resolved load as readiness would only discover the truth later, at
+    // run(), with a much less obvious error.
+    if (this.disposed) {
+      throw new InferenceError('CANCELLED', 'Pipeline was disposed and cannot load again')
+    }
     this.status = 'loading'
     // The model load is the cancellable part; the tokenizer fetch is not, because
     // transformers.js exposes no signal for from_pretrained.

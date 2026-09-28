@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { pipelineLoadCancellationCase } from './case'
 import { ABORT_PROBE_BYTES, ABORT_PROBE_PATH } from './probeAsset.meta'
@@ -21,7 +22,21 @@ describe('pipeline load cancellation contract', () => {
     expect(ABORT_PROBE_BYTES).toBeGreaterThan(4 * 1024 * 1024)
   })
 
+  // Reads .gitignore rather than asserting the constant matches itself: the previous
+  // version compared the path to a prefix it had just been written with, so deleting
+  // the ignore rule would have left it green while a 24 MiB binary sat one `git add`
+  // away from a permanent commit.
   it('keeps the generated probe asset out of version control', () => {
-    expect(ABORT_PROBE_PATH.startsWith('static-models/')).toBe(true)
+    const gitignore = readFileSync(new URL('../../../.gitignore', import.meta.url), 'utf8')
+    const directory = ABORT_PROBE_PATH.split('/')[0]
+    const rules = gitignore
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('#'))
+    const ignored = rules.some((rule) => {
+      const normalized = rule.replace(/^\/+|\/+$/g, '')
+      return normalized === directory || normalized === `/${directory}`
+    })
+    expect(ignored, `${directory} must be ignored so the generated asset cannot be committed`).toBe(true)
   })
 })

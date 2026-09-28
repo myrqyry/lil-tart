@@ -15,6 +15,7 @@ interface FakeEntry {
   bytes: number
   assetUrl: string
   base?: string
+  path?: string
 }
 
 // One shared store, so deletions persist across open() calls the way real
@@ -44,7 +45,9 @@ function cache() {
                 ? entry.assetUrl
                 : name === 'x-lil-tart-base'
                   ? entry.base ?? null
-                  : null,
+                  : name === 'x-lil-tart-asset-path'
+                    ? entry.path ?? null
+                    : null,
         },
       }
     },
@@ -168,6 +171,44 @@ describe('listStoredModels', () => {
     expect(await listStoredModels('https://host/v1/')).toEqual([
       { modelId: 'model', bytes: 900, assets: 1 },
     ])
+  })
+
+  // https://host/ and https://host/v1 both resolve "v1/model.tflite" to the same absolute
+  // URL, because a base whose last segment is a file is not a directory. Base-string
+  // equality would call this live entry orphaned and offer to delete usable bytes.
+  it('keeps an entry reachable through a base that resolves the same URL', async () => {
+    const assetUrl = 'https://huggingface.co/litert-community/model.tflite'
+    seed([
+      {
+        url: cacheKeyUrl('model', assetUrl),
+        bytes: 900,
+        assetUrl,
+        base: 'https://huggingface.co/',
+        path: 'litert-community/model.tflite',
+      },
+    ])
+
+    expect(await listStoredModels('https://huggingface.co/litert-community')).toEqual([
+      { modelId: 'model', bytes: 900, assets: 1 },
+    ])
+    expect(await listOrphanedModels('https://huggingface.co/litert-community')).toEqual([])
+  })
+
+  it('still orphans an entry the current base resolves to a different URL', async () => {
+    const assetUrl = 'https://huggingface.co/litert-community/model.tflite'
+    seed([
+      {
+        url: cacheKeyUrl('model', assetUrl),
+        bytes: 900,
+        assetUrl,
+        base: 'https://huggingface.co/',
+        path: 'litert-community/model.tflite',
+      },
+    ])
+
+    // "model.tflite" under this base is /litert-community/model.tflite, but the
+    // recorded path resolves elsewhere once the base is nested a level deeper.
+    expect(await listStoredModels('https://huggingface.co/other/')).toEqual([])
   })
 
   it('treats bases that normalize to the same URL as the same base', async () => {

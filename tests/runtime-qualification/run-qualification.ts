@@ -17,8 +17,6 @@ export interface QualificationCliOptions {
   headed: boolean
 }
 
-ensureAbortProbeAsset()
-
 const cases = [
   tinyLitertBaselineCase,
   pipelineLoadCancellationCase,
@@ -78,6 +76,13 @@ async function main(): Promise<void> {
   const browserCases = options.caseIds
     ? cases
     : cases.filter((qualificationCase) => qualificationCase.evidenceKind === 'browser-observation')
+  // Generated here, after argument parsing and only for the cases that declare the
+  // dependency. Writing it at module scope made `pnpm qualify -- --help` and the
+  // `pnpm test:qualification` gate both materialise a 24 MiB binary as a side effect of
+  // merely importing this CLI.
+  if (browserCases.some((qualificationCase) => qualificationCase.requiresProbeAsset)) {
+    ensureAbortProbeAsset()
+  }
   const results = await runBrowserQualification(browserCases, {
     launch: { browserName: options.browserName, headless: !options.headed },
     selection,

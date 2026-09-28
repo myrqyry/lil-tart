@@ -143,6 +143,14 @@ describe('EncoderPipeline cancellation', () => {
     expect(pipeline.status).toBe('idle')
   })
 
+  it('rejects a load attempted after disposal', async () => {
+    const pipeline = new EncoderPipeline({ manifest: encoder230mManifest })
+    await pipeline.dispose()
+
+    // Resolving here would tell the caller the model is ready when there is no model.
+    await expect(pipeline.load(context as never)).rejects.toThrow(/disposed/i)
+  })
+
   it('refuses to load through an already-aborted signal', async () => {
     const { seen, context: ctx } = hangingContext()
     const controller = new AbortController()

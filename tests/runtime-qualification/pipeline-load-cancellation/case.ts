@@ -4,7 +4,6 @@ import type {
   QualificationObservation,
 } from '../schema/types'
 import { pipelineLoadCancellationExpected } from './expected'
-import { ABORT_PROBE_BYTES } from './probeAsset.meta'
 
 export async function runPipelineLoadCancellation(
   context: QualificationContext,
@@ -21,6 +20,7 @@ export const pipelineLoadCancellationCase: QualificationCase = {
   description:
     'Proves that aborting a real in-flight model transfer stops the bytes, using the shared asset resolver.',
   evidenceKind: 'browser-observation',
+  requiresProbeAsset: true,
   environments: [
     {
       runtimePackage: '@litertjs/core',
@@ -31,5 +31,3 @@ export const pipelineLoadCancellationCase: QualificationCase = {
   expected: pipelineLoadCancellationExpected,
   run: runPipelineLoadCancellation,
 }
-
-export { ABORT_PROBE_BYTES }

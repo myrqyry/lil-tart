@@ -41,7 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix`: terminate TTS workers on failure and probe WASM features honestly
 
 ### Verification
-- Add a `pipeline-load-cancellation` runtime qualification case that streams a real cross-origin asset through the shared asset resolver in headless Chromium and observes that an abort stops the transfer, closing the cancellation evidence gap that only stubbed `fetch` had covered. Durable record in `docs/verification/2026-09-28-model-load-cancellation.md`
+- Add a `pipeline-load-cancellation` runtime qualification case that streams a real cross-origin asset through the shared asset resolver in headless Chromium and observes that cancelling stops the transfer, closing the cancellation evidence gap that only stubbed `fetch` had covered. It probes `AssetResolver.resolve()`, the path production loading actually takes, since `stream()` has no production caller. Durable record in `docs/verification/2026-09-28-model-load-cancellation.md`
+- `fix(playground)`: decide cached-asset membership by whether the current base resolves the entry's recorded path to its stored URL. Base-string equality was wrong in both directions: too strict for a base whose last segment is a file, which made live entries look orphaned and removable
+- `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a load attempted after disposal now rejects instead of resolving, so a caller cannot mistake a disposed pipeline for a ready one
 
 ### Docs
 - Canonical Git dependency examples now use the renamed `myrqyry/lil-tart` repository while preserving the stable `@litert-playground/*` package namespace.

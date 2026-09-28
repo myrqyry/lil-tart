@@ -137,6 +137,9 @@ export interface QualificationCase {
   id: string
   description: string
   evidenceKind: QualificationEvidenceKind
+  // Declares that the run needs the generated probe asset origin. The harness uses this
+  // to decide whether to bind that server at all, so an unrelated case never pays for it.
+  requiresProbeAsset?: boolean
   model?: QualificationModel
   environments: QualificationEnvironment[]
   expected: {

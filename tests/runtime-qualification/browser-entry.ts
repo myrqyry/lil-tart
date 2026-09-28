@@ -66,53 +66,78 @@ Object.assign(window, {
       const verified = await verifyQualificationAsset(buffer, descriptor)
       return Array.from(new Uint8Array(verified))
     },
-    // Streams a real local asset through the shared resolver, aborts after the first
-    // chunk, and reports what actually happened. The engine cannot be cancelled once
-    // it starts compiling, so the transfer is the only place cancellation can be proven.
+    // Probes the path production actually takes. Every model load in this repository
+    // reaches the resolver through runtime-litert's resolve() -> assets.resolve(), the
+    // buffered whole-body branch; AssetResolver.stream() currently has no production
+    // caller, so probing it alone would instrument a door nobody walks through.
     async probeAbortStopsTransfer(origin: string) {
       const url = new URL('/asset', origin)
       const resolver = createHttpAssetResolver(url.origin)
       const controller = new AbortController()
-      const asset = { id: 'abort-probe.bin', path: url.pathname.replace(/^\//, '') }
-      if (!resolver.stream) {
-        return { status: 'fail' as const, stage: 'probe', error: { message: 'resolver cannot stream' } }
-      }
-      const stream = await resolver.stream(asset, { signal: controller.signal })
-      const reader = stream.getReader()
-      const first = await reader.read()
-      if (first.done || !first.value) {
+      const asset = { id: 'abort-probe.bin', path: 'asset' }
+
+      let loadedBytes = 0
+      let settled = false
+      let signalFirstByte: () => void = () => {}
+      const firstByte = new Promise<void>((resolveByte) => {
+        signalFirstByte = resolveByte
+      })
+      const transferred = resolver
+        .resolve(asset, {
+          signal: controller.signal,
+          onProgress: (progress) => {
+            loadedBytes = progress.loadedBytes
+            signalFirstByte()
+          },
+        })
+        .then(
+          () => {
+            settled = true
+            signalFirstByte()
+            return null
+          },
+          (error: unknown) => {
+            settled = true
+            signalFirstByte()
+            return error
+          },
+        )
+
+      // Cancel on the first byte that actually moves, not on a timer. A local origin can
+      // deliver a whole buffered body in a few milliseconds, so a fixed delay would let
+      // the transfer finish before any abort could land and the probe would prove
+      // nothing. This is also the real scenario: a user switching models mid-download.
+      await Promise.race([
+        firstByte,
+        new Promise((resolveTick) => setTimeout(resolveTick, 10_000)),
+      ])
+      if (settled) {
         return {
           status: 'fail' as const,
           stage: 'probe',
-          error: { message: 'asset completed before any abort could be observed' },
+          error: { message: 'the asset completed before any abort could be observed' },
         }
       }
-      const bytesAtAbort = first.value.byteLength
+
+      const bytesAtAbort = loadedBytes
       controller.abort()
+      const error = await transferred
 
-      let bytesAfterAbort = bytesAtAbort
-      let cancellationCode: string | null = null
-      try {
-        for (;;) {
-          const next = await reader.read()
-          if (next.done) break
-          bytesAfterAbort += next.value?.byteLength ?? 0
-        }
-      } catch (error) {
-        const code = (error as { code?: string }).code
-        cancellationCode = typeof code === 'string' ? code : 'uncoded'
-      }
-
-      const transferStopped = bytesAfterAbort < ABORT_PROBE_BYTES
-      if (!transferStopped || cancellationCode !== 'CANCELLED') {
+      const code = (error as { code?: string } | null)?.code ?? null
+      if (bytesAtAbort <= 0 || bytesAtAbort >= ABORT_PROBE_BYTES) {
         return {
           status: 'fail' as const,
           stage: 'probe',
           error: {
-            message:
-              `abort did not stop the transfer: ${bytesAfterAbort} of ${ABORT_PROBE_BYTES} bytes, ` +
-              `cancellation code ${String(cancellationCode)}`,
+            message: `abort did not stop the transfer: ${bytesAtAbort} of ${ABORT_PROBE_BYTES} bytes`,
           },
+        }
+      }
+      if (code !== 'CANCELLED') {
+        return {
+          status: 'fail' as const,
+          stage: 'probe',
+          error: { message: `expected CANCELLED, observed ${String(code)}` },
         }
       }
       return { status: 'pass' as const }

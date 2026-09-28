@@ -50,18 +50,30 @@ function normalizeBase(base: string): string {
 // everything written under the previous base. Entries written under another base can
 // never be read again, so they must not be counted as stored.
 //
-// Membership comes from the base an entry was written with, not from a path prefix.
-// A prefix is too loose once bases are nested: an entry cached at
-// https://host/v1/model.tflite does sit under https://host/, but the current resolver
-// asks for https://host/model.tflite and will never read it, so counting it would put
-// the "stored locally" lie straight back. Entries written before the base was recorded
-// have no recorded value and fall back to the structural prefix comparison.
+// Membership is reachability: would the current base resolve this entry's asset path to
+// the URL the entry was stored under? Comparing base strings is not equivalent, in both
+// directions. A nested base is too loose: https://host/ would claim an entry cached at
+// https://host/v1/model.tflite that the resolver will now request as
+// https://host/model.tflite. And a base whose last segment is a file rather than a
+// directory is too strict: https://host/ and https://host/v1 both resolve the path
+// "v1/model.tflite" to https://host/v1/model.tflite, so a plain string comparison would
+// call a still-reachable entry orphaned and offer to delete live bytes.
+// Entries written before the path was recorded fall back to base equality, and before
+// that to a structural prefix comparison.
 function belongsToBase(
   assetUrl: string | null | undefined,
   base: string,
   recordedBase?: string | null,
+  recordedPath?: string | null,
 ): boolean {
   if (!assetUrl) return false
+  if (recordedPath) {
+    try {
+      return new URL(recordedPath, normalizeBase(base)).href === assetUrl
+    } catch {
+      return false
+    }
+  }
   if (recordedBase) return recordedBase === normalizeBase(base)
   try {
     const target = new URL(base, pageBase())
@@ -114,6 +126,7 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
               'x-lil-tart-model-id': owner,
               'x-lil-tart-asset-url': assetUrl,
               'x-lil-tart-base': normalizeBase(base),
+              'x-lil-tart-asset-path': asset.path,
             },
           }),
         )
@@ -168,6 +181,7 @@ async function collectStoredModels(base: string, keepMatching: boolean): Promise
         response?.headers.get('x-lil-tart-asset-url'),
         base,
         response?.headers.get('x-lil-tart-base'),
+        response?.headers.get('x-lil-tart-asset-path'),
       )
       if (matches !== keepMatching) continue
       const bytes = Number(response?.headers.get('x-lil-tart-bytes') ?? 0)
@@ -232,6 +246,7 @@ async function removeMatching(modelId: string, base: string, keepMatching: boole
         response?.headers.get('x-lil-tart-asset-url'),
         base,
         response?.headers.get('x-lil-tart-base'),
+        response?.headers.get('x-lil-tart-asset-path'),
       )
       if (matches !== keepMatching) continue
       await cache.delete(request)
