@@ -37,7 +37,6 @@ export const sam2DecoderAdapter: ModelAdapter = {
   // The graph contract is verified, but this component is not a usable standalone playground model:
   // it needs encoder features plus host-side point encoding. Keep it unavailable until those steps are one pipeline.
   disabled: true,
-  requiredBackend: 'wasm', // LiteRT.js 2.5.3 browser sweep: WebGPU runs but does not match WASM for this graph.
   inputSpecs: [
     { name: 'image_embeddings', dtype: 'float32', shape: [1, 256, 64, 64], description: 'From SAM2 image encoder v2' },
     { name: 'feat_s1', dtype: 'float32', shape: [1, 64, 128, 128], description: 'FPN feature s1 from encoder' },
