@@ -4,6 +4,7 @@ import type { TartGuideMessage, TartGuideTone } from '../tartGuide'
 interface TartGuideProps {
   guide: TartGuideMessage
   onRunPreflight?: () => void
+  embedded?: boolean
 }
 
 const toneClasses: Record<TartGuideTone, string> = {
@@ -84,10 +85,10 @@ function TartMascot({ tone, compact = false }: { tone: TartGuideTone; compact?: 
   )
 }
 
-export default function TartGuide({ guide, onRunPreflight }: TartGuideProps) {
+export default function TartGuide({ guide, onRunPreflight, embedded = false }: TartGuideProps) {
   const [collapsed, setCollapsed] = useState(false)
 
-  if (collapsed) {
+  if (!embedded && collapsed) {
     return (
       <button
         type="button"
@@ -103,7 +104,9 @@ export default function TartGuide({ guide, onRunPreflight }: TartGuideProps) {
 
   return (
     <aside
-      className={`fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-xl border p-2.5 text-on-surface shadow-xl backdrop-blur-md ${toneClasses[guide.tone]}`}
+      className={`${embedded
+        ? 'w-full rounded-xl border p-3 text-on-surface'
+        : 'fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] rounded-xl border p-2.5 text-on-surface shadow-xl backdrop-blur-md'} ${toneClasses[guide.tone]}`}
       aria-label="Lil Tart guide"
     >
       <div className="flex items-start gap-2.5">
@@ -117,15 +120,17 @@ export default function TartGuide({ guide, onRunPreflight }: TartGuideProps) {
               </p>
               <h2 className="mt-0.5 text-[15px] font-semibold text-on-surface">{guide.title}</h2>
             </div>
-            <button
-              type="button"
-              onClick={() => setCollapsed(true)}
-              className="rounded-full px-2 py-1 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
-              aria-label="Minimize Lil Tart guide"
-              title="Minimize"
-            >
-              −
-            </button>
+            {!embedded && (
+              <button
+                type="button"
+                onClick={() => setCollapsed(true)}
+                className="rounded-full px-2 py-1 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
+                aria-label="Minimize Lil Tart guide"
+                title="Minimize"
+              >
+                −
+              </button>
+            )}
           </div>
 
           <p className="mt-1 text-[13px] leading-snug text-on-surface-variant">{guide.message}</p>
