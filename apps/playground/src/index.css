@@ -78,6 +78,7 @@ body {
   min-height: 100vh;
   margin: 0;
   font-family: inherit;
+  font-weight: 440;
   font-variation-settings: "opsz" 14, "wdth" 100;
   letter-spacing: -0.006em;
   background:
