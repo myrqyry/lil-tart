@@ -36,7 +36,7 @@ describe('Hugging Face model contracts', () => {
     expect(sam2DecoderAdapter.metadata.modelPath).toMatch(/sam2_tiny_mask_decoder_v2_fp16\.tflite$/)
     expect(sam2DecoderAdapter.outputSpecs.map((spec) => spec.name)).toEqual(['pred_masks', 'iou_scores'])
     expect(sam2DecoderAdapter.disabled).toBe(true)
-    expect(sam2DecoderAdapter.requiredBackend).toBe('wasm')
+    expect(sam2DecoderAdapter.requiredBackend).toBeUndefined()
   })
 
   it('keeps incomplete CLIPSeg unavailable instead of exposing the old fake pipeline', () => {
