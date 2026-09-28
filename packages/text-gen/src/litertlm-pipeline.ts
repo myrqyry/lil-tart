@@ -176,20 +176,27 @@ async function readStream(
   return { text: full, ...(reasoning ? { reasoning } : {}) };
 }
 
-// ponytail: manifest asset paths are repo-relative, so they must travel through the
-// runtime's asset resolver. Handing the raw path to the engine would let the browser
-// resolve it against the app origin instead of the configured model base.
-async function resolveModelInput(
-  context: RuntimeContext,
-  path: string,
-): Promise<string | Blob | ReadableStream<Uint8Array>> {
-  const assets = context?.assets
-  if (typeof assets?.resolve !== 'function') return path
-  const asset = { id: path, path }
-  if (typeof assets.stream === 'function') {
-    return assets.stream(asset, { signal: context.signal })
+// ponytail: manifest asset paths are repo-relative. Handing one to the engine raw lets the
+// browser resolve it against the app origin, which 404s, so the caller supplies the model
+// base and the path is made absolute. The engine then fetches and streams the checkpoint
+// itself. Deliberately NOT routed through context.assets.stream(): resolvers in this repo
+// materialize the whole checkpoint into an ArrayBuffer before wrapping it in a
+// ReadableStream, and a full buffered read is the wrong memory trade for a
+// multi-billion-parameter model in a browser.
+function resolveModelReference(path: string, base?: string): string {
+  if (!base) return path
+  const pageBase = (globalThis as { location?: { href: string } }).location?.href ?? 'http://localhost/'
+  try {
+    return new URL(path, new URL(base, pageBase)).href
+  } catch {
+    return path
   }
-  return new Blob([await assets.resolve(asset, { signal: context.signal })])
+}
+
+export interface LiteRtLmTextPipelineOptions {
+  // Base the manifest's repo-relative asset path is resolved against. Omit to
+  // pass the path through unchanged.
+  modelBase?: string;
 }
 
 export class LiteRtLmTextPipeline
@@ -203,8 +210,13 @@ export class LiteRtLmTextPipeline
   private engine: LiteRtLmEngine | null = null;
   private conversation: LiteRtLmConversation | null = null;
   private loadMs = 0;
+  private readonly options: LiteRtLmTextPipelineOptions;
 
-  constructor(manifestOrModelId: ModelManifest | string = litertLmManifest) {
+  constructor(
+    manifestOrModelId: ModelManifest | string = litertLmManifest,
+    options: LiteRtLmTextPipelineOptions = {}
+  ) {
+    this.options = options;
     this.manifest =
       typeof manifestOrModelId === 'string'
         ? resolveTextGenerationManifest(manifestOrModelId) ?? {
@@ -228,7 +240,7 @@ export class LiteRtLmTextPipeline
         this.manifest.assets.find((a) => a.id === 'model')?.path ??
         this.manifest.assets[0]?.path ??
         DEFAULTS.model;
-      const model = await resolveModelInput(context, modelPath);
+      const model = resolveModelReference(modelPath, this.options.modelBase);
       const backend = context.backend === 'webnn' ? undefined : context.backend;
       this.engine = await module.Engine.create({
         model,

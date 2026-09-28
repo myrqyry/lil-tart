@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { listStoredModels, pruneSupersededModelCaches } from './modelStorage'
+import {
+  listOrphanedModels,
+  listStoredModels,
+  pruneSupersededModelCaches,
+} from './modelStorage'
 
 const CACHE_PATH = '/__lil_tart_model_cache__/'
 const HF = 'https://huggingface.co/'
@@ -104,6 +108,59 @@ describe('listStoredModels', () => {
     ])
 
     expect(await listStoredModels(HF)).toEqual([])
+  })
+
+  // A base typed without a trailing slash must not claim a sibling path that merely
+  // shares its leading characters. This is reachable: the model-server base is
+  // free-text user input in the playground runtime panel.
+  it('does not claim a sibling path when the base has no trailing slash', async () => {
+    seed([
+      {
+        url: cacheKeyUrl('model', 'https://huggingface.co/litert-community-evil/model.tflite'),
+        bytes: 100,
+        assetUrl: 'https://huggingface.co/litert-community-evil/model.tflite',
+      },
+    ])
+
+    expect(await listStoredModels('https://huggingface.co/litert-community')).toEqual([])
+    expect(await listOrphanedModels('https://huggingface.co/litert-community')).toEqual([
+      { modelId: 'model', bytes: 100, assets: 1 },
+    ])
+  })
+
+  it('claims the base path itself and its descendants without a trailing slash', async () => {
+    seed([
+      {
+        url: cacheKeyUrl('model', 'https://huggingface.co/litert-community/model.tflite'),
+        bytes: 100,
+        assetUrl: 'https://huggingface.co/litert-community/model.tflite',
+      },
+    ])
+
+    expect(await listStoredModels('https://huggingface.co/litert-community')).toEqual([
+      { modelId: 'model', bytes: 100, assets: 1 },
+    ])
+  })
+})
+
+describe('listOrphanedModels', () => {
+  it('separates entries written under a superseded base without deleting them', async () => {
+    const modelId = 'lfm2.5-encoder-230m'
+    const superseded = 'https://app.test/litert-community/encoder/resolve/main/model.tflite'
+    const current = `${HF}litert-community/encoder/resolve/main/model.tflite`
+    seed([
+      { url: cacheKeyUrl(modelId, current), bytes: 500, assetUrl: current },
+      { url: cacheKeyUrl(modelId, superseded), bytes: 500, assetUrl: superseded },
+    ])
+
+    expect(await listStoredModels(HF)).toEqual([{ modelId, bytes: 500, assets: 1 }])
+    expect(await listOrphanedModels(HF)).toEqual([{ modelId, bytes: 500, assets: 1 }])
+
+    // Listing must not reclaim: switching the base back has to recover the entries.
+    expect(await listOrphanedModels(HF)).toHaveLength(1)
+    expect(await listStoredModels('https://app.test/')).toEqual([
+      { modelId, bytes: 500, assets: 1 },
+    ])
   })
 })
 

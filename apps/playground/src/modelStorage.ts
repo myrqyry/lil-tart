@@ -44,11 +44,21 @@ function resolvedAssetUrl(path: string, base: string): string {
 
 // Cache keys embed the resolved absolute URL, so changing a resolver's base
 // orphans everything written under the previous base. Entries recorded against
-// another base can never be read again, so they must not be counted as stored
-// and should be reclaimable.
+// another base can never be read again, so they must not be counted as stored.
+// Compared structurally, not lexically: a base without a trailing slash must not
+// claim a sibling path that merely starts with the same characters.
 function belongsToBase(assetUrl: string | null | undefined, base: string): boolean {
   if (!assetUrl) return false
-  return assetUrl.startsWith(new URL(base, pageBase()).href)
+  try {
+    const target = new URL(base, pageBase())
+    const actual = new URL(assetUrl, pageBase())
+    if (actual.origin !== target.origin) return false
+    if (actual.pathname === target.pathname) return true
+    const prefix = target.pathname.endsWith('/') ? target.pathname : `${target.pathname}/`
+    return actual.pathname.startsWith(prefix)
+  } catch {
+    return false
+  }
 }
 
 export function registerModelAssets(modelId: string, paths: readonly string[]): void {
@@ -114,6 +124,17 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
 }
 
 export async function listStoredModels(base: string): Promise<StoredModelInfo[]> {
+  return collectStoredModels(base, true)
+}
+
+// Entries written under a base other than the one in use. They are unreachable
+// but not deleted: a user who typed the base can switch back to recover them, so
+// they are surfaced for deliberate removal instead of reclaimed automatically.
+export async function listOrphanedModels(base: string): Promise<StoredModelInfo[]> {
+  return collectStoredModels(base, false)
+}
+
+async function collectStoredModels(base: string, keepMatching: boolean): Promise<StoredModelInfo[]> {
   const storage = cacheStorage()
   if (!storage) return []
 
@@ -126,7 +147,7 @@ export async function listStoredModels(base: string): Promise<StoredModelInfo[]>
       const modelId = modelIdFromRequest(request)
       if (!modelId) continue
       const response = await cache.match(request)
-      if (!belongsToBase(response?.headers.get('x-lil-tart-asset-url'), base)) continue
+      if (belongsToBase(response?.headers.get('x-lil-tart-asset-url'), base) !== keepMatching) continue
       const bytes = Number(response?.headers.get('x-lil-tart-bytes') ?? 0)
       const current = models.get(modelId) ?? { modelId, bytes: 0, assets: 0 }
       current.bytes += Number.isFinite(bytes) ? bytes : 0

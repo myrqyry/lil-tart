@@ -166,56 +166,60 @@ describe("LiteRtLmTextPipeline", () => {
     );
   });
 
-  // The manifest path is repo-relative. Handing it straight to the engine makes the
-  // browser resolve it against the app origin, which 404s; it has to go through the
-  // runtime's asset resolver so the configured model base applies.
-  it("resolves the model through the asset resolver instead of passing the raw path", async () => {
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.enqueue(new Uint8Array([1]));
-        controller.close();
-      },
+  // The manifest path is repo-relative. Handing it to the engine raw makes the
+  // browser resolve it against the app origin, which 404s, so it has to be made
+  // absolute. The engine streams the checkpoint itself: routing through
+  // context.assets would materialize the whole model into an ArrayBuffer first,
+  // which is the wrong memory trade for a 1.2B-parameter model in a browser.
+  it("passes an absolute URL so the engine streams the model itself", async () => {
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
     });
-    const assets = {
-      resolve: vi.fn(),
-      stream: vi.fn().mockResolvedValue(stream),
-    };
-    const context: RuntimeContext = {
-      ...fakeContext(),
-      assets: assets as unknown as RuntimeContext["assets"],
-    };
+    await p.load(fakeContext());
 
-    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
-    await p.load(context);
-
-    expect(assets.stream).toHaveBeenCalledWith(
-      {
-        id: "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
-        path: "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
-      },
-      { signal: undefined }
-    );
-    expect(assets.resolve).not.toHaveBeenCalled();
     expect(mockEngineCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ model: stream })
+      expect.objectContaining({
+        model:
+          "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+        backend: "wasm",
+      })
     );
+
+    const passed = mockEngineCreate.mock.calls[0][0].model;
+    expect(typeof passed).toBe("string");
+    expect(passed).not.toBeInstanceOf(Blob);
   });
 
-  it("falls back to a Blob when the resolver cannot stream", async () => {
-    const bytes = new ArrayBuffer(4);
-    const assets = { resolve: vi.fn().mockResolvedValue(bytes) };
+  it("never buffers the checkpoint through the asset resolver", async () => {
+    const resolve = vi.fn();
+    const stream = vi.fn();
     const context: RuntimeContext = {
       ...fakeContext(),
-      assets: assets as unknown as RuntimeContext["assets"],
+      assets: { resolve, stream } as unknown as RuntimeContext["assets"],
     };
 
-    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/",
+    });
     await p.load(context);
 
-    expect(assets.resolve).toHaveBeenCalledTimes(1);
-    const passed = mockEngineCreate.mock.calls[0][0].model;
-    expect(passed).toBeInstanceOf(Blob);
-    expect(await (passed as Blob).arrayBuffer()).toEqual(bytes);
+    // Buffering here is the regression this test exists to prevent.
+    expect(resolve).not.toHaveBeenCalled();
+    expect(stream).not.toHaveBeenCalled();
+  });
+
+  it("resolves against a model base that has no trailing slash", async () => {
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      modelBase: "https://huggingface.co/litert-community",
+    });
+    await p.load(fakeContext());
+
+    expect(mockEngineCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model:
+          "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      })
+    );
   });
 });
 

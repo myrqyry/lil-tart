@@ -114,7 +114,7 @@ export function LfmPipelinePanel() {
 
       ctxRef.current = ctx
       nextPipeline =
-        m.kind === 'text' ? new LiteRtLmTextPipeline(m.manifest)
+        m.kind === 'text' ? new LiteRtLmTextPipeline(m.manifest, { modelBase: MODEL_BASE })
         : m.kind === 'colbert' ? new ColBertPipeline({ manifest: m.manifest })
         : new EncoderPipeline({ manifest: m.manifest })
 

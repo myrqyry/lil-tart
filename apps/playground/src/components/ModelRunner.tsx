@@ -5,6 +5,7 @@ import type { ModelAdapter, TensorSpec } from '../adapters/types'
 import { getTartGuideMessage } from '../tartGuide'
 import {
   clearStoredModels,
+  listOrphanedModels,
   listStoredModels,
   removeStoredModel,
   type StoredModelInfo,
@@ -89,6 +90,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const [storedModels, setStoredModels] = useState<StoredModelInfo[]>([])
+  const [orphanedModels, setOrphanedModels] = useState<StoredModelInfo[]>([])
   const [storageBusy, setStorageBusy] = useState(false)
   const [modelBaseInput, setModelBaseInput] = useState(modelBase)
 
@@ -99,6 +101,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
 
   const refreshStoredModels = useCallback(async () => {
     setStoredModels(await listStoredModels(modelBase))
+    setOrphanedModels(await listOrphanedModels(modelBase))
   }, [modelBase])
 
   useEffect(() => {
@@ -176,6 +179,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   )
   const selectedLoaded = !!selectedAdapter && !selectedAdapter.isPipeline && loaded && loadedModelId === selectedAdapter.modelId
   const storedBytes = storedModels.reduce((total, model) => total + model.bytes, 0)
+  const orphanedBytes = orphanedModels.reduce((total, model) => total + model.bytes, 0)
   const recentTelemetry = telemetry.slice(-4).reverse()
   const tartGuide = getTartGuideMessage({
     selectedModelName: selectedAdapter?.metadata.name ?? null,
@@ -212,6 +216,26 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                 >
                   Clear
                 </button>
+              </div>
+            )}
+
+            {orphanedModels.length > 0 && (
+              <div className="flex items-center gap-1 text-xs text-on-surface-variant">
+                <span>
+                  {orphanedModels.length} under a previous base · {formatBytes(orphanedBytes)}
+                </span>
+                {orphanedModels.map((model) => (
+                  <button
+                    key={model.modelId}
+                    type="button"
+                    title={`Remove ${model.modelId}`}
+                    onClick={() => void handleRemoveStored(model.modelId)}
+                    disabled={storageBusy || loading}
+                    className="rounded-md px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
+                  >
+                    Remove {model.modelId}
+                  </button>
+                ))}
               </div>
             )}
 

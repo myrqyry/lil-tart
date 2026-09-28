@@ -19,9 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - `encoder` and `retrieval` now keep `inference-core` as a peer contract instead of leaking `workspace:*` into downstream package metadata.
 - `fix(playground)`: resolve LFM pipeline model assets from Hugging Face instead of the app origin, so packaged consumers load the same weights as the app
-- `fix(text-gen)`: resolve the LiteRT-LM model through the runtime's asset resolver instead of handing the repo-relative manifest path to the engine, which resolved it against the app origin and 404'd
+- `fix(text-gen)`: resolve the LiteRT-LM model to an absolute URL from an explicit model base instead of handing the repo-relative manifest path to the engine, which resolved it against the app origin and 404'd. The engine fetches and streams the checkpoint itself rather than buffering it through the asset resolver
 - `fix(playground)`: the LFM panel's LiteRT WASM runtime now loads from the pinned `@litertjs/core` jsDelivr CDN; `apps/playground/public/` ships no `wasm/` directory, so origin-relative resolution could not work
 - `fix(playground)`: report stored model bytes for the resolver base actually in use, and reclaim entries orphaned by a base change, so "stored locally" no longer claims weights that would be re-downloaded
+- `fix(playground)`: keep weights cached under a previous model-server base visible and individually removable instead of reachable only through "clear all", which also erased the current base
+- `fix(playground)`: match cache entries against the model base structurally, so a base without a trailing slash no longer claims sibling paths that share its leading characters
 - `fix(retrieval)`: remove unused retrieval state that broke stricter downstream TypeScript consumers
 - `fix`: cache LiteRT runtime in `ensureRuntime` and persist Ready badge (`packages/runtime-litert/src/context.ts:90`, `packages/runtime-litert/src/types.ts:96`)
 - `fix`: make MoViNet frame commit transactional and correct WASM probes
