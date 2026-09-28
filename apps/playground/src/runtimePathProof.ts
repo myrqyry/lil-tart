@@ -5,7 +5,6 @@ export type RuntimeOperation = 'idle' | 'model-load' | 'preflight' | 'inference'
 
 export interface RuntimePathInferenceEvent {
   modelPath: string
-  selectedBackend: string
   requestedBackend: string
   resolvedBackend: string
   inferenceDurationMs: number
@@ -18,6 +17,7 @@ export interface RuntimePathProof {
   modelId: string
   modelName: string
   modelPath: string
+  selectedBackend: string
   requestedBackend: string
   resolvedBackend: string
   compileDurationMs: number
