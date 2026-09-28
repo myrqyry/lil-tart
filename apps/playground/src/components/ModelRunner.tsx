@@ -230,7 +230,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
         className="workspace-grid mx-auto grid w-full gap-4 px-3 py-3 md:px-4 lg:grid-cols-[26rem_minmax(0,1fr)] xl:px-5"
         style={{ maxWidth: 1800 }}
       >
-        <aside className="workspace-sidebar lg:sticky lg:top-3 lg:flex lg:h-[calc(100vh-1.5rem)] lg:min-h-0 lg:flex-col">
+        <aside className="lg:sticky lg:top-3 lg:flex lg:h-[calc(100vh-1.5rem)] lg:min-h-0 lg:flex-col">
           <section className="neo-pod tart-pod p-4">
             <div className="mb-3 flex items-start justify-between gap-3">
               <div>
@@ -511,7 +511,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           </section>
         </aside>
 
-        <main className="model-library min-w-0">
+        <main className="min-w-0">
           <header className="neo-pod library-pod mb-4 flex flex-wrap items-end justify-between gap-3 px-4 py-4">
             <div>
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-muted">Model library</p>
