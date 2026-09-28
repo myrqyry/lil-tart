@@ -249,6 +249,7 @@ export const edsrAdapter: ModelAdapter = {
 export const miganAdapter: ModelAdapter = {
   modelId: 'migan',
   metadata: { name: 'MI-GAN — Image Inpainting', description: 'Object removal / image inpainting (512×512)', modelPath: 'https://huggingface.co/litert-community/MI-GAN-512-Places2-LiteRT/resolve/main/migan_fp16.tflite', tags: ['vision', 'inpainting'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('input', [1, 4, 512, 512], 'float32', 'concat(mask-0.5, rgb·mask) NCHW')],
   outputSpecs: [outSpec('output', [1, 3, 512, 512], 'float32', 'Inpainted RGB [-1,1] NCHW')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
@@ -293,6 +294,7 @@ function makeStyleAdapter(modelId: string, name: string, modelPath: string): Mod
   return {
     modelId,
     metadata: { name, description: `Fast Neural Style Transfer (${name.split('—')[1]?.trim() ?? modelId})`, modelPath, tags: ['vision', 'creative'] },
+    requiredBackend: 'wasm',
     ...sharedStyleSpecs,
     prepareInputs(values: Record<string, any>): Record<string, Tensor> {
       const imageData = values['image'] as ImageData
@@ -365,6 +367,7 @@ export const yoloxSAdapter = makeYoloxAdapter('yolox-s', 'S', 'https://huggingfa
 export const sinetAdapter: ModelAdapter = {
   modelId: 'sinet-v2',
   metadata: { name: 'SINet-V2 — Camouflage Detection', description: 'Camouflaged object segmentation', modelPath: 'https://huggingface.co/litert-community/SINet-V2-Camouflage-LiteRT/resolve/main/sinet.tflite', tags: ['vision', 'segmentation'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('input', [1, 3, 352, 352], 'float32', 'RGB ImageNet-normalized NCHW')],
   outputSpecs: [outSpec('output', [1, 1, 352, 352], 'float32', 'Camouflaged-object probability')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
@@ -433,6 +436,7 @@ export const bisenetFaceAdapter: ModelAdapter = {
 export const pidnetAdapter: ModelAdapter = {
   modelId: 'pidnet-s-cityscapes',
   metadata: { name: 'PIDNet-S — Cityscapes Segmentation', description: '19-class urban scene segmentation (1/8 resolution)', modelPath: 'https://huggingface.co/litert-community/PIDNet-S-Cityscapes-LiteRT/resolve/main/pidnet_s.tflite', tags: ['vision', 'segmentation'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('input', [1, 3, 1024, 1024], 'float32', 'RGB ImageNet-normalized NCHW')],
   outputSpecs: [outSpec('output', [1, 19, 128, 128], 'float32', '19-class logits at 1/8 resolution')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
@@ -450,6 +454,7 @@ export const pidnetAdapter: ModelAdapter = {
 export const twinliteAdapter: ModelAdapter = {
   modelId: 'twinlitenet',
   metadata: { name: 'TwinLiteNet — Drivable Area & Lanes', description: 'Drivable-area and lane-line segmentation (360×640)', modelPath: 'https://huggingface.co/litert-community/TwinLiteNet-LiteRT/resolve/main/twinlite.tflite', tags: ['vision', 'segmentation'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('input', [1, 3, 360, 640], 'float32', 'RGB x/255 NCHW')],
   outputSpecs: [
     outSpec('drivable_area', [1, 2, 360, 640], 'float32', 'Drivable-area logits'),
@@ -519,6 +524,7 @@ export const mogeAdapter: ModelAdapter = {
 export const tipsv2Adapter: ModelAdapter = {
   modelId: 'tipsv2-b14-dpt',
   metadata: { name: 'TIPSv2 — Depth, Normals & Seg', description: 'Depth (metres), surface normals and 150-class segmentation (448×448)', modelPath: 'https://huggingface.co/litert-community/TIPSv2-B14-DPT-LiteRT/resolve/main/tipsv2_b14_dpt_fp16.tflite', tags: ['vision', 'depth'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('input', [1, 3, 448, 448], 'float32', 'RGB [0,1] NCHW (no ImageNet)')],
   outputSpecs: [
     outSpec('depth', [1, 1, 448, 448], 'float32', 'Depth in metres'),
@@ -561,6 +567,7 @@ export const nafnetGoproAdapter: ModelAdapter = {
 export const gfpganAdapter: ModelAdapter = {
   modelId: 'gfpgan-v1.4',
   metadata: { name: 'GFPGAN — Face Restoration', description: 'Blind face restoration (512×512, ~431 MB)', modelPath: 'https://huggingface.co/litert-community/GFPGAN-v1.4-LiteRT/resolve/main/gfpgan_fp16.tflite', tags: ['vision', 'face', 'restoration'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('input', [1, 3, 512, 512], 'float32', 'RGB [-1,1] NCHW')],
   outputSpecs: [outSpec('output', [1, 3, 512, 512], 'float32', 'Restored RGB [-1,1] NCHW')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
@@ -643,6 +650,7 @@ export const peCoreAdapter: ModelAdapter = {
 export const clothSegAdapter: ModelAdapter = {
   modelId: 'cloth-segmentation',
   metadata: { name: 'Cloth Segmentation (U²-Net)', description: '4-class clothing parsing', modelPath: 'https://huggingface.co/litert-community/Cloth-Segmentation-U2Net-LiteRT/resolve/main/clothseg.tflite', tags: ['vision', 'segmentation'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('image', [1, 3, 768, 768], 'float32', 'RGB [-1,1] NCHW')],
   outputSpecs: [outSpec('output', [1, 4, 768, 768], 'float32', '4-class logits')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
@@ -660,6 +668,7 @@ export const clothSegAdapter: ModelAdapter = {
 export const mlsdAdapter: ModelAdapter = {
   modelId: 'm-lsd-tiny',
   metadata: { name: 'M-LSD-tiny — Line Detection', description: 'Line-segment center heatmap', modelPath: 'https://huggingface.co/litert-community/M-LSD-tiny-LiteRT/resolve/main/mlsd_fp16.tflite', tags: ['vision', 'line-detection'] },
+  requiredBackend: 'wasm',
   inputSpecs: [inpSpec('image', [1, 4, 512, 512], 'float32', 'RGB + ones channel, x/127.5-1, NCHW')],
   outputSpecs: [outSpec('tpMap', [1, 9, 256, 256], 'float32', 'ch0 center, ch1-4 displacement')],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
