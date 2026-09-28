@@ -191,6 +191,18 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     [storedModels],
   )
   const selectedLoaded = !!selectedAdapter && !selectedAdapter.isPipeline && loaded && loadedModelId === selectedAdapter.modelId
+  const executionBackend = selectedLoaded ? modelInfo?.requestedBackend ?? null : null
+  const backendConstraints = selectedAdapter && !selectedAdapter.isPipeline
+    ? [
+        ...(selectedAdapter.requiredBackend ? [{ graph: 'main', backend: selectedAdapter.requiredBackend }] : []),
+        ...(selectedAdapter.graphs ?? [])
+          .filter((graph) => graph.requiredBackend)
+          .map((graph) => ({ graph: graph.name, backend: graph.requiredBackend! })),
+      ]
+    : []
+  const activeBackendOverrides = accelerator === 'auto'
+    ? []
+    : backendConstraints.filter((constraint) => constraint.backend !== accelerator)
   const storedBytes = storedModels.reduce((total, model) => total + model.bytes, 0)
   const orphanedBytes = orphanedModels.reduce((total, model) => total + model.bytes, 0)
   const recentTelemetry = telemetry.slice(-4).reverse()
@@ -201,6 +213,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
     progressPercent: downloadProgress?.totalBytes ? progressPercent(downloadProgress) : null,
     error,
     requestedBackend: accelerator,
+    executionBackend,
     resolvedBackend: selectedLoaded ? resolvedAccelerator : null,
     fallbackCount: selectedLoaded ? modelInfo?.fallbackCount ?? 0 : 0,
     preflightComplete: selectedLoaded && preflight !== null,
@@ -262,6 +275,14 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
+            {activeBackendOverrides.length > 0 && (
+              <span
+                className="rounded-md bg-tertiary-container px-1.5 py-1 text-xs font-medium text-on-tertiary-container"
+                title={activeBackendOverrides.map(({ graph, backend }) => `${graph}: ${backend.toUpperCase()}`).join(', ')}
+              >
+                Correctness override · {activeBackendOverrides.map(({ backend }) => backend.toUpperCase()).filter((value, index, values) => values.indexOf(value) === index).join(' + ')}
+              </span>
+            )}
 
             <details className="relative">
               <summary className="cursor-pointer list-none rounded-md border border-outline-variant bg-surface-container-high px-2 py-1 text-sm text-on-surface-variant transition-colors hover:bg-surface-container-highest hover:text-on-surface">
@@ -323,7 +344,9 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                 <div>
                   <p className="text-sm font-medium text-on-surface-variant">Runtime receipt</p>
                   <p className="mt-0.5 text-base font-semibold text-on-surface">
-                    requested {accelerator.toUpperCase()} → resolved {(resolvedAccelerator ?? 'unknown').toUpperCase()}
+                    {executionBackend && executionBackend !== accelerator
+                      ? `selected ${accelerator.toUpperCase()} → runtime request ${executionBackend.toUpperCase()} → resolved ${(resolvedAccelerator ?? 'unknown').toUpperCase()}`
+                      : `requested ${accelerator.toUpperCase()} → resolved ${(resolvedAccelerator ?? 'unknown').toUpperCase()}`}
                   </p>
                   {selectedAdapter.metadata.tags.length > 0 && (
                     <div className="mt-1.5 flex flex-wrap gap-1">
@@ -368,7 +391,9 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                     <div>
                       <p className="text-sm font-semibold text-on-surface">Session path proof captured</p>
                       <p className="mt-0.5 text-xs text-on-surface-variant">
-                        requested {runtimePathProof.requestedBackend.toUpperCase()} → resolved {runtimePathProof.resolvedBackend.toUpperCase()}
+                        {runtimePathProof.selectedBackend !== runtimePathProof.requestedBackend
+                          ? `selected ${runtimePathProof.selectedBackend.toUpperCase()} → runtime request ${runtimePathProof.requestedBackend.toUpperCase()} → resolved ${runtimePathProof.resolvedBackend.toUpperCase()}`
+                          : `requested ${runtimePathProof.requestedBackend.toUpperCase()} → resolved ${runtimePathProof.resolvedBackend.toUpperCase()}`}
                       </p>
                     </div>
                     <span className="rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">
