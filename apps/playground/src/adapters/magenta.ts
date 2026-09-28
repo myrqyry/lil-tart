@@ -48,7 +48,7 @@ export const magentaAdapter: ModelAdapter = {
     modelPath: '/models/magenta.tflite',
     tags: ['audio', 'music', 'magenta']
   },
-  disabled: true, // ponytail: google/magenta-realtime on Kaggle only (no browser-fetchable HF mirror) — needs locating
+  disabled: true, // Official HF repo exists, but Magenta RealTime 2 is a multi-component pipeline; this single-graph placeholder is not a verified contract.
   inputSpecs: INPUT_SPECS,
   outputSpecs: OUTPUT_SPECS,
 
