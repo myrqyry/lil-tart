@@ -172,7 +172,12 @@ export const ormbgAdapter: ModelAdapter = {
     return { input: t }
   },
   parseOutputs(o: Record<string, Tensor>) {
-    const [_, _c, _h, W] = this.oexport const u2netSalientAdapter: ModelAdapter = {
+    const [_, _c, H, W] = this.outputSpecs[0].shape
+    return tensorToImageData(o.alpha, W, H).then(d => ({ alpha: d }))
+  },
+}
+
+export const u2netSalientAdapter: ModelAdapter = {
   modelId: 'u2net-salient',
   metadata: { name: 'U-2-Net — Saliency', description: 'Salient object detection (320×320)', modelPath: 'https://huggingface.co/litert-community/U-2-Net/resolve/main/u2net_fp16.tflite', tags: ['vision', 'segmentation'] },
   inputSpecs: [s('input', 'float32', [1, 3, 320, 320], 'RGB per-image-max scaling + ImageNet normalization, NCHW')],
@@ -186,11 +191,6 @@ export const ormbgAdapter: ModelAdapter = {
   },
   parseOutputs(o: Record<string, Tensor>) {
     const [_, _c, H, W] = this.outputSpecs[0].shape
-    return tensorToImageData(o.saliency, W, H).then(d => ({ saliency: d }))
-  },
-}
-
-Specs[0].shape
     return tensorToImageData(o.saliency, W, H).then(d => ({ saliency: d }))
   },
 }
