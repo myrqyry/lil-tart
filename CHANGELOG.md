@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix(playground)`: replace 12 empty adapters (`sam2` ×2, `vision` ×10 including `6drepnet`, `blaze-face`, `yolox`, `u2net`, `edsr`, `migan`, `style-*`) with working `prepareInputs`/`parseOutputs` (`apps/playground/src/adapters/sam2.ts:16`, `apps/playground/src/adapters/vision.ts:70`)
 
 ### Fixed
+- Pin LiteRT-LM Hugging Face artifacts to immutable upstream revisions and record their published byte sizes and SHA-256 provenance instead of following mutable `main` paths.
+- Enforce Qwen3-TTS manifest integrity on both direct and worker execution paths, including runtime requests that identify an asset by its file path rather than its semantic manifest ID.
 - `encoder` and `retrieval` now keep `inference-core` as a peer contract instead of leaking `workspace:*` into downstream package metadata.
 - `fix(playground)`: resolve LFM pipeline model assets from Hugging Face instead of the app origin, so packaged consumers load the same weights as the app
 - `fix(text-gen)`: resolve the LiteRT-LM model to an absolute URL from an explicit model base instead of handing the repo-relative manifest path to the engine, which resolved it against the app origin and 404'd
@@ -41,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix`: terminate TTS workers on failure and probe WASM features honestly
 
 ### Verification
+- Lock the official Qwen3-TTS host-loop contract in regression coverage: 16 MTP passes per generated frame, 64-frame codec windows, and 25-frame left context after the first window.
 - Add a `pipeline-load-cancellation` runtime qualification case that streams a real cross-origin asset through the shared asset resolver in headless Chromium and observes that cancelling stops the transfer, closing the cancellation evidence gap that only stubbed `fetch` had covered. It probes `AssetResolver.resolve()`, the path production loading actually takes, since `stream()` has no production caller. Durable record in `docs/verification/2026-09-28-model-load-cancellation.md`
 - `fix(playground)`: decide cached-asset membership by whether the current base resolves the entry's recorded path to its stored URL. Base-string equality was wrong in both directions: too strict for a base whose last segment is a file, which made live entries look orphaned and removable
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: a load attempted after disposal now rejects instead of resolving, so a caller cannot mistake a disposed pipeline for a ready one

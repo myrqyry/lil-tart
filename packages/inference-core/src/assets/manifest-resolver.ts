@@ -7,7 +7,9 @@ import {
 } from '../types'
 
 function assetFromManifest(manifest: ModelManifest, asset: ModelAsset): ModelAsset {
-  return manifest.assets.find((candidate) => candidate.id === asset.id) ?? asset
+  return manifest.assets.find(
+    (candidate) => candidate.id === asset.id || candidate.path === asset.path,
+  ) ?? asset
 }
 
 function bytesFromStream(stream: ReadableStream<Uint8Array>): Promise<ArrayBuffer> {

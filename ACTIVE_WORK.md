@@ -1,6 +1,42 @@
 <!-- meristem-template:v1 -->
 # Active Work
 
+Subject: aster/litert-upstream-hardening — source pinning, artifact integrity, and official LiteRT contract hardening.
+
+## Current outcome
+
+Lil Tart now consumes upstream LiteRT model artifacts with immutable provenance,
+enforces available integrity facts on real Qwen3-TTS execution paths, and locks
+the host-side Qwen orchestration to the current official reference contract.
+
+## Current evidence
+
+- google-ai-edge/litert-samples inspected at 940336695f6f3bb119e93dc00e9eac27476095ab on 2026-09-28.
+- Published Hugging Face artifacts are pinned to immutable commit revisions with exact LFS sizes and SHA-256 provenance.
+- Focused tests passed: inference-core 34, qwen3-tts 41, text-gen 24.
+- Full repository pnpm verify passed, including typecheck, tests, boundaries, packed-consumer compatibility, runtime qualification, and build.
+- Durable record: docs/verification/2026-09-28-litert-upstream-integrity.md.
+
+## Deliberate boundary
+
+LiteRT-LM checkpoints remain streaming inputs to Engine.create. Do not force
+multi-gigabyte checkpoints through the full-buffer hash verifier merely to hash
+them; immutable revision pinning is the current runtime guarantee until
+incremental or file-backed verification preserves the streaming memory profile.
+
+## Base continuity
+
+This branch was created from clean fix/consumer-runtime-integration at 2200684.
+That work was already committed and pushed. Its prior active-work record is
+preserved below rather than discarded.
+
+---
+
+## Prior active-work record (preserved)
+
+<!-- meristem-template:v1 -->
+# Active Work
+
 Subject: `fix/consumer-runtime-integration` — downstream consumer hardening and
 the retrieval scoring entrypoint.
 

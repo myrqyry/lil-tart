@@ -3,7 +3,8 @@ import { sample, SampleOpts } from './sampler'
 import { traceArray, traceTensor, type GeneratorTraceEvent } from './generator-trace'
 
 const MTP_CACHE_SLOTS = 17
-const MTP_CODEBOOKS = 15
+export const QWEN3_TTS_MTP_PASSES_PER_FRAME = 16
+const MTP_CODEBOOKS = QWEN3_TTS_MTP_PASSES_PER_FRAME - 1
 const HIDDEN = 1024
 const CODEC_VOCAB = 3072
 const NEG_INF = -1e9

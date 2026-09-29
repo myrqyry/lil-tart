@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Qwen3TtsPipeline, qwen3TtsManifest, type QwenTtsConfig } from '@litert-playground/qwen3-tts'
 import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
 import { createModelLibraryAssetResolver, registerModelAssets } from '../modelStorage'
-import type { PipelineProgress } from '@litert-playground/inference-core'
+import { createManifestVerifyingAssetResolver, type PipelineProgress } from '@litert-playground/inference-core'
 
 let pipeline: Qwen3TtsPipeline | null = null
 
@@ -59,7 +59,10 @@ export function Qwen3TtsPanel() {
 
       const ctx = await createLiteRtRuntime({
         assetBase: '/models/qwen3-tts',
-        assets: createModelLibraryAssetResolver('/models/qwen3-tts/'),
+        assets: createManifestVerifyingAssetResolver(
+          p.manifest,
+          createModelLibraryAssetResolver('/models/qwen3-tts/'),
+        ),
       })
       ctxRef.current = ctx
       await p.load(ctx)
