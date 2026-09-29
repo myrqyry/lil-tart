@@ -339,41 +339,38 @@ h1 {
   box-shadow: inset 3px 3px 7px oklch(0.025 0.01 330 / 0.42);
 }
 
-.tart-guide {
+.runtime-guide {
   border-width: 1px;
   border-style: solid;
-  border-radius: 2rem 2.45rem 2rem 2.6rem;
+  border-radius: 1.65rem 2.1rem 1.65rem 2.1rem;
   box-shadow:
-    7px 9px 18px oklch(0.025 0.01 330 / 0.36),
-    -3px -3px 10px oklch(0.45 0.025 330 / 0.1),
-    inset 0 1px 0 oklch(1 0 0 / 0.055);
+    6px 8px 16px oklch(0.025 0.01 330 / 0.32),
+    -2px -2px 8px oklch(0.45 0.025 330 / 0.08),
+    inset 0 1px 0 oklch(1 0 0 / 0.05);
   transition:
-    border-radius 420ms var(--ease-spring),
-    background-color 280ms ease,
-    border-color 280ms ease,
-    transform 320ms var(--ease-spring-soft);
+    border-radius 360ms var(--ease-spring),
+    background-color 240ms ease,
+    border-color 240ms ease,
+    transform 280ms var(--ease-spring-soft);
 }
 
-.tart-guide--embedded:hover {
-  border-radius: 2.45rem 2rem 2.6rem 2rem;
+.runtime-guide:hover {
+  border-radius: 2rem 1.65rem 2.1rem 1.65rem;
   transform: translateY(-1px);
 }
 
-.tart-mascot {
-  transform-origin: 50% 82%;
-  animation: tart-idle 4.8s ease-in-out infinite;
-}
-
-.neo-fab {
-  border: 1px solid var(--color-outline);
-  background: var(--color-surface-container-high);
+.runtime-guide__icon {
+  display: inline-flex;
+  width: 2.15rem;
+  height: 2.15rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  color: currentColor;
+  background: color-mix(in oklab, currentColor 10%, var(--color-surface-container));
   box-shadow:
-    7px 9px 20px var(--neo-shadow),
-    -4px -4px 13px var(--neo-highlight);
-}
-
-.neo-fab:hover {
-  transform: translateY(-2px) scale(1.06) rotate(2deg);
+    3px 4px 9px oklch(0.025 0.01 330 / 0.34),
+    -1px -1px 5px oklch(0.45 0.025 330 / 0.08);
 }
 
 .model-card {
@@ -567,12 +564,6 @@ h1 {
     opacity: 1;
     transform: none;
   }
-}
-
-@keyframes tart-idle {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  45% { transform: translateY(-2px) rotate(-0.7deg); }
-  55% { transform: translateY(-2px) rotate(0.7deg); }
 }
 
 @media (max-width: 560px) {
