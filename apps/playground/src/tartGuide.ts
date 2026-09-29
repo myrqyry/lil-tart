@@ -104,7 +104,9 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
     const selected = backendLabel(snapshot.requestedBackend)
     const overrides = overrideList(snapshot.backendOverrides)
     const fallbackMessage = snapshot.fallbackCount > 0
-      ? ' After those explicit graph requests, the runtime also took ' + snapshot.fallbackCount + ' ' + plural(snapshot.fallbackCount, 'fallback') + '; that fallback evidence is preserved per graph in the session proof.'
+      ? snapshot.pathProofAvailable
+        ? ' After those explicit graph requests, the runtime also took ' + snapshot.fallbackCount + ' ' + plural(snapshot.fallbackCount, 'fallback') + '; that fallback evidence is preserved per graph in the session proof.'
+        : ' The main graph has also reported ' + snapshot.fallbackCount + ' ' + plural(snapshot.fallbackCount, 'fallback') + ' so far; the per-graph split will not exist until a real inference completes.'
       : ' Those are direct correctness requests, not runtime fallbacks.'
 
     return {
