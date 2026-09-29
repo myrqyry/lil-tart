@@ -160,18 +160,8 @@ h1 {
     inset 0 1px 0 var(--neo-ring);
 }
 
-.tart-pod {
-  overflow: visible;
-  border-radius: 2.6rem 2.6rem 2.1rem 2.1rem;
-}
-
 .inference-pod {
   border-radius: 2.1rem 2.1rem 2.6rem 2.6rem;
-}
-
-.library-pod {
-  min-height: 6.5rem;
-  border-radius: 2.5rem;
 }
 
 .pod-header {
