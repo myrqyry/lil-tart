@@ -87,6 +87,18 @@ describe('manifest-verifying asset resolver', () => {
     })
   })
 
+  it('applies manifest integrity facts when a runtime requests an asset by exact path', async () => {
+    const verifying = createManifestVerifyingAssetResolver(
+      { ...manifest, assets: [{ id: 'semantic-model-id', path: 'model.bin', bytes: 4 }] },
+      resolver(),
+    )
+
+    await expect(verifying.resolve({ id: 'model.bin', path: 'model.bin' })).rejects.toMatchObject({
+      code: 'ASSET_INTEGRITY_FAILED',
+      asset: 'semantic-model-id',
+    })
+  })
+
   it('does not require absent verification facts', async () => {
     await expect(
       createManifestVerifyingAssetResolver(manifest, resolver()).resolve({ id: 'model', path: 'model.bin' }),

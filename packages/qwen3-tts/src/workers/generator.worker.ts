@@ -1,14 +1,20 @@
 /// <reference lib="webworker" />
 import { createLiteRtRuntime } from '@litert-playground/runtime-litert';
-import { createCachingAssetResolver, createHttpAssetResolver } from '@litert-playground/inference-core';
+import {
+  createCachingAssetResolver,
+  createHttpAssetResolver,
+  createManifestVerifyingAssetResolver,
+  type ModelManifest,
+} from '@litert-playground/inference-core';
 import { GeneratorPhase } from '../phases/generator';
 import type { GeneratorWorkerRequest, GeneratorWorkerResponse } from './protocol';
 import { serializeError } from './protocol';
 
 let phase: GeneratorPhase | undefined;
 
-async function buildContext(modelBase: string) {
-  const assets = createCachingAssetResolver(createHttpAssetResolver(modelBase));
+async function buildContext(modelBase: string, manifest: ModelManifest) {
+  const inner = createCachingAssetResolver(createHttpAssetResolver(modelBase));
+  const assets = createManifestVerifyingAssetResolver(manifest, inner);
   return createLiteRtRuntime({ assets });
 }
 
@@ -16,12 +22,12 @@ self.onmessage = async (event: MessageEvent<GeneratorWorkerRequest>) => {
   const req = event.data;
   try {
     if (req.type === 'initialize') {
-      const context = await buildContext(req.modelBase);
       phase = new GeneratorPhase(req.variant, {
         onProgress: (progress) => {
           self.postMessage({ type: 'progress', progress } satisfies GeneratorWorkerResponse);
         },
       });
+      const context = await buildContext(req.modelBase, phase.manifest);
       await phase.load(context);
       self.postMessage({ type: 'ready' } satisfies GeneratorWorkerResponse);
       return;
