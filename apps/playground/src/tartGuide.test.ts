@@ -105,6 +105,22 @@ describe('getTartGuideMessage', () => {
     expect(message.message).toContain('not runtime fallbacks')
   })
 
+  it('does not claim per-graph preservation before a session proof exists', () => {
+    const message = getTartGuideMessage(snapshot({
+      selectedModelName: 'Tiny Pipeline',
+      loaded: true,
+      requestedBackend: 'webgpu',
+      backendOverrides: [{ graph: 'decoder', backend: 'wasm' }],
+      fallbackCount: 1,
+      pathProofAvailable: false,
+    }))
+
+    expect(message.tone).toBe('warning')
+    expect(message.message).toContain('main graph')
+    expect(message.message).toContain('per-graph split will not exist')
+    expect(message.message).not.toContain('preserved per graph')
+  })
+
   it('reports both correctness overrides and runtime fallbacks when both occurred', () => {
     const message = getTartGuideMessage(snapshot({
       selectedModelName: 'Tiny Pipeline',
