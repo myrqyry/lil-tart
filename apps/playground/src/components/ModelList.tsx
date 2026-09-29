@@ -397,7 +397,7 @@ export default function ModelList({
                   disabled={storageBusy || disabled}
                   aria-label={`Remove downloaded files for ${adapter.metadata.name}`}
                   title="Remove downloaded files"
-                  className="absolute bottom-2 right-2 z-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-on-surface-muted transition-transform hover:scale-110 hover:bg-error-container/25 hover:text-error active:scale-90 disabled:opacity-40"
+                  className="absolute bottom-2 right-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full text-on-surface-muted transition-transform hover:scale-110 hover:bg-error-container/25 hover:text-error active:scale-90 disabled:opacity-40"
                 >
                   <Delete2Regular className="h-3.5 w-3.5" />
                 </button>
