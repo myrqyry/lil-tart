@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Delete2Regular, StorageRegular } from '@mingcute/react/core-regular'
 import { useModelRunner } from '../hooks/useModelRunner'
 import type { Accelerator } from '../hooks/useModelRunner'
 import type { ModelAdapter, TensorSpec } from '../adapters/types'
@@ -227,35 +228,17 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   return (
     <div className="app-shell min-h-screen bg-surface-dim">
       <div
-        className="workspace-grid mx-auto grid w-full gap-4 px-3 py-3 md:px-4 lg:grid-cols-[26rem_minmax(0,1fr)] xl:px-5"
+        className="workspace-grid mx-auto grid w-full gap-4 px-3 py-2 md:px-4 lg:grid-cols-[minmax(32rem,42%)_minmax(0,1fr)] xl:px-5"
         style={{ maxWidth: 1800 }}
       >
-        <aside className="lg:sticky lg:top-3 lg:flex lg:h-[calc(100vh-1.5rem)] lg:min-h-0 lg:flex-col">
-          <section className="neo-pod tart-pod p-4">
-            <div className="mb-3 flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">Local model workshop</p>
-                <h1 className="mt-1 text-[28px] font-bold leading-none text-on-surface">Lil Tart</h1>
-                <p className="mt-1.5 text-[13px] leading-snug text-on-surface-variant">
-                  Pick a model, prove the path, then keep the receipt.
-                </p>
-              </div>
-              {(storedModels.length > 0 || orphanedModels.length > 0) && (
-                <div className="neo-badge px-3 py-1.5 text-right text-[11px] text-on-surface-variant">
-                  <p className="font-semibold text-on-surface">{storedModels.length} local</p>
-                  <p>{formatBytes(storedBytes)}</p>
-                </div>
-              )}
-            </div>
+        <aside className="lg:sticky lg:top-2 lg:flex lg:h-[calc(100vh-1rem)] lg:min-h-0 lg:flex-col">
+          <TartGuide
+            embedded
+            guide={tartGuide}
+            onRunPreflight={selectedLoaded ? () => void preflightModel() : undefined}
+          />
 
-            <TartGuide
-              embedded
-              guide={tartGuide}
-              onRunPreflight={selectedLoaded ? () => void preflightModel() : undefined}
-            />
-          </section>
-
-          <section className="neo-pod inference-pod mt-4 flex min-h-0 flex-1 flex-col overflow-hidden">
+          <section className="neo-pod inference-pod mt-3 flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="pod-header px-4 py-3">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-muted">Inference lab</p>
               <div className="mt-0.5 flex items-center justify-between gap-2">
@@ -512,49 +495,51 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
         </aside>
 
         <main className="min-w-0">
-          <header className="neo-pod library-pod mb-4 flex flex-wrap items-end justify-between gap-3 px-4 py-4">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-on-surface-muted">Model library</p>
-              <h2 className="mt-0.5 text-xl font-semibold text-on-surface">Choose what to run</h2>
-              <p className="mt-1 text-xs text-on-surface-variant">
-                Browse locally runnable models. Downloads stay explicit.
-              </p>
-            </div>
+
+          <div className="mb-3 flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search name, task, or model id…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="neo-search min-w-0 flex-1 px-4 py-3 text-[15px] text-on-surface placeholder:text-on-surface-muted focus:outline-none"
+            />
 
             {(storedModels.length > 0 || orphanedModels.length > 0) && (
-              <div className="flex flex-wrap items-center justify-end gap-1.5 text-xs text-on-surface-variant">
-                <span>{storedModels.length} downloaded · {formatBytes(storedBytes)}</span>
+              <div className="neo-badge flex shrink-0 items-center gap-1.5 px-2 py-1.5 text-xs text-on-surface-variant">
+                <StorageRegular className="h-4 w-4 text-secondary" />
+                <span className="font-medium text-on-surface">{storedModels.length}</span>
+                <span className="hidden text-on-surface-muted xl:inline">{formatBytes(storedBytes)}</span>
                 <button
                   type="button"
                   onClick={() => void handleClearStored()}
                   disabled={storageBusy || loading}
-                  className="rounded-md px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
+                  className="ml-0.5 inline-flex h-7 w-7 items-center justify-center rounded-full text-error transition-transform hover:scale-110 hover:bg-error-container/30 active:scale-95 disabled:opacity-40"
+                  title="Clear downloaded models"
+                  aria-label="Clear downloaded models"
                 >
-                  Clear all
+                  <Delete2Regular className="h-4 w-4" />
                 </button>
-                {orphanedModels.map((model) => (
-                  <button
-                    key={model.modelId}
-                    type="button"
-                    title={model.unverified ? 'Load this model to verify its older cache metadata, or use Clear all to remove all downloads.' : 'Remove ' + model.modelId}
-                    onClick={() => void handleRemoveOrphaned(model.modelId)}
-                    disabled={storageBusy || loading || model.unverified}
-                    className="rounded-md bg-surface-container px-1.5 py-1 text-error transition-colors hover:bg-error-container/35 disabled:opacity-50"
-                  >
-                    {model.unverified ? 'Unverified' : 'Remove'} {model.modelId}
-                  </button>
-                ))}
               </div>
             )}
-          </header>
+          </div>
 
-          <input
-            type="text"
-            placeholder="Search name, task, or model id…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="neo-search mb-3 w-full px-4 py-3 text-[15px] text-on-surface placeholder:text-on-surface-muted focus:outline-none"
-          />
+          {orphanedModels.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-on-surface-variant">
+              {orphanedModels.map((model) => (
+                <button
+                  key={model.modelId}
+                  type="button"
+                  title={model.unverified ? 'Load this model to verify its older cache metadata, or clear all downloads.' : 'Remove ' + model.modelId}
+                  onClick={() => void handleRemoveOrphaned(model.modelId)}
+                  disabled={storageBusy || loading || model.unverified}
+                  className="tag-chip px-2 py-1 text-error disabled:opacity-45"
+                >
+                  {model.unverified ? 'Unverified' : 'Remove'} {model.modelId}
+                </button>
+              ))}
+            </div>
+          )}
 
           <ModelList
             adapters={filtered}
