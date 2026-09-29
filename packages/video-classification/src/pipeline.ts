@@ -159,7 +159,7 @@ export class MoViNetPipeline implements Pipeline<MoViNetInput, MoViNetPrediction
     this.report({ phase: 'loading', step: 0, total: 1 });
     try {
       const runtime = context.liteRt as unknown as ManagedLiteRtRuntime;
-      const model = await runtime.loadModel(this.modelUrl);
+      const model = await runtime.loadModel(this.modelUrl, { accelerator: 'wasm' });
       const details = model.getInputDetails();
       this.state.init(details.map(d => ({
         shape: Array.from(d.shape),
@@ -187,7 +187,7 @@ export class MoViNetPipeline implements Pipeline<MoViNetInput, MoViNetPrediction
       const frameTensor = this.canvasToTensor(input.canvas);
       const { inputs, nextFrame } = await this.state.buildInputTensors(frameTensor);
       try {
-        const rawOutput = await this.runtime.predict(this.modelUrl, inputs, { signal });
+        const rawOutput = await this.runtime.predict(this.modelUrl, inputs, { signal, accelerator: 'wasm' });
         const outputs = Array.isArray(rawOutput) ? rawOutput : Object.values(rawOutput);
         try {
           const logitsArr = new Float32Array(this.runtime.readTensor<Float32Array>(outputs[0]));

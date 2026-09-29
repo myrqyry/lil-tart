@@ -73,7 +73,20 @@ function typedInput(value: unknown): Float32Array | Int32Array | Int8Array | Uin
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  if (!(error instanceof Error)) return String(error)
+  const cause = (error as Error & { cause?: unknown }).cause
+  return cause ? `${error.message}: ${cause instanceof Error ? cause.message : String(cause)}` : error.message
+}
+
+function graphAccelerator(adapter: ModelAdapter, graph: string, requested: Accelerator): Accelerator {
+  if (graph === 'main') return adapter.requiredBackend ?? requested
+  return adapter.graphs?.find((entry) => entry.name === graph)?.requiredBackend ?? requested
+}
+
+function webNNOptionsFor(target: Accelerator) {
+  return target === 'webnn' || target === 'auto'
+    ? { devicePreference: 'npu' as const, powerPreference: 'high-performance' as const }
+    : undefined
 }
 
 export function useModelRunner(): UseModelRunnerReturn {
@@ -113,7 +126,8 @@ export function useModelRunner(): UseModelRunnerReturn {
   }, [modelBase])
 
   const refreshRuntimeState = useCallback((runtime: ManagedLiteRtRuntimeContext, adapter: ModelAdapter, target: Accelerator) => {
-    const info = runtime.liteRt.getModelInfo(adapter.metadata.modelPath, { accelerator: target }) ?? null
+    const effectiveTarget = graphAccelerator(adapter, 'main', target)
+    const info = runtime.liteRt.getModelInfo(adapter.metadata.modelPath, { accelerator: effectiveTarget }) ?? null
     const nextTelemetry = runtime.liteRt.getTelemetry()
     setModelInfo(info)
     setResolvedAccelerator(info?.resolvedBackend ?? runtime.backend)
@@ -138,7 +152,11 @@ export function useModelRunner(): UseModelRunnerReturn {
     setDownloadProgress(null)
 
     try {
-      const graphPaths = [adapter.metadata.modelPath, ...(adapter.graphs ?? []).map((graph) => graph.modelPath)]
+      const graphEntries = [
+        { name: 'main', modelPath: adapter.metadata.modelPath },
+        ...(adapter.graphs ?? []),
+      ]
+      const graphPaths = graphEntries.map((graph) => graph.modelPath)
       registerModelAssets(adapter.modelId, graphPaths)
       const runtime = await ensureRuntime()
       const previous = adapterRef.current
@@ -147,13 +165,12 @@ export function useModelRunner(): UseModelRunnerReturn {
         previous.graphs?.forEach((graph) => runtime.liteRt.disposeModel(graph.modelPath))
       }
 
-      for (const modelPath of graphPaths) {
-        await runtime.liteRt.loadModel(modelPath, {
-          accelerator: target,
+      for (const graph of graphEntries) {
+        const effectiveTarget = graphAccelerator(adapter, graph.name, target)
+        await runtime.liteRt.loadModel(graph.modelPath, {
+          accelerator: effectiveTarget,
           signal: controller.signal,
-          webNNOptions: target === 'webnn' || target === 'auto'
-            ? { devicePreference: 'npu', powerPreference: 'high-performance' }
-            : undefined,
+          webNNOptions: webNNOptionsFor(effectiveTarget),
           onProgress: (progress) => setDownloadProgress(progress),
         })
       }
@@ -221,10 +238,6 @@ export function useModelRunner(): UseModelRunnerReturn {
     try {
       const runtime = await ensureRuntime()
       const telemetryStart = runtime.liteRt.getTelemetry().length
-      const webNNOptions = accelerator === 'webnn' || accelerator === 'auto'
-        ? { devicePreference: 'npu' as const, powerPreference: 'high-performance' as const }
-        : undefined
-
       let parsed: Record<string, unknown>
       if (adapter.run) {
         const ctx: InferenceContext = {
@@ -233,7 +246,12 @@ export function useModelRunner(): UseModelRunnerReturn {
               ? adapter.metadata.modelPath
               : adapter.graphs?.find((entry) => entry.name === graph)?.modelPath
             if (!graphPath) throw new Error(`Unknown graph '${graph}' for ${adapter.modelId}`)
-            const options = { accelerator, label: `playground:${adapter.modelId}:${graph}`, webNNOptions }
+            const effectiveTarget = graphAccelerator(adapter, graph, accelerator)
+            const options = {
+              accelerator: effectiveTarget,
+              label: `playground:${adapter.modelId}:${graph}`,
+              webNNOptions: webNNOptionsFor(effectiveTarget),
+            }
             const result = signature
               ? await runtime.liteRt.predictWithSignature(graphPath, signature, inputs, options)
               : await runtime.liteRt.predict(graphPath, inputs, options)
@@ -252,10 +270,11 @@ export function useModelRunner(): UseModelRunnerReturn {
           }
         }
 
+        const effectiveTarget = graphAccelerator(adapter, 'main', accelerator)
         const result = await runtime.liteRt.predict(adapter.metadata.modelPath, inputs, {
-          accelerator,
+          accelerator: effectiveTarget,
           label: `playground:${adapter.modelId}`,
-          webNNOptions,
+          webNNOptions: webNNOptionsFor(effectiveTarget),
         })
         const outputRecord = normalizeOutputs(result, adapter.outputSpecs)
         parsed = await adapter.parseOutputs(outputRecord)
@@ -280,7 +299,7 @@ export function useModelRunner(): UseModelRunnerReturn {
       const runtimeState = refreshRuntimeState(runtime, adapter, accelerator)
       setRuntimePathProof(createRuntimePathProof({
         adapter,
-        requestedBackend: accelerator,
+        selectedBackend: accelerator,
         modelInfo: runtimeState.info,
         telemetry: runtimeState.telemetry,
         telemetryStart,
@@ -304,11 +323,10 @@ export function useModelRunner(): UseModelRunnerReturn {
     setError(null)
     try {
       const runtime = await ensureRuntime()
+      const effectiveTarget = graphAccelerator(adapter, 'main', accelerator)
       const result = await runtime.liteRt.preflight(adapter.metadata.modelPath, {
-        accelerator,
-        webNNOptions: accelerator === 'webnn' || accelerator === 'auto'
-          ? { devicePreference: 'npu', powerPreference: 'high-performance' }
-          : undefined,
+        accelerator: effectiveTarget,
+        webNNOptions: webNNOptionsFor(effectiveTarget),
       })
       setPreflight(result)
       refreshRuntimeState(runtime, adapter, accelerator)

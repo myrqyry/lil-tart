@@ -10,6 +10,10 @@ const adapter = {
     modelPath: 'models/tiny.tflite',
     tags: ['test'],
   },
+  graphs: [
+    { name: 'encoder', modelPath: 'models/encoder.tflite' },
+    { name: 'decoder', modelPath: 'models/decoder.tflite' },
+  ],
   verification: {
     status: 'compile-verified' as const,
     backends: ['webgpu' as const],
@@ -37,7 +41,7 @@ describe('createRuntimePathProof', () => {
   it('refuses to manufacture proof without inference telemetry from this run', () => {
     const proof = createRuntimePathProof({
       adapter,
-      requestedBackend: 'auto',
+      selectedBackend: 'auto',
       modelInfo: null,
       telemetry: [event({ event: 'compile', inferenceDurationMs: undefined })],
       telemetryStart: 1,
@@ -48,10 +52,10 @@ describe('createRuntimePathProof', () => {
     expect(proof).toBeNull()
   })
 
-  it('captures the resolved runtime path without promoting durable verification', () => {
+  it('captures the main graph path without promoting durable verification', () => {
     const proof = createRuntimePathProof({
       adapter,
-      requestedBackend: 'auto',
+      selectedBackend: 'auto',
       modelInfo: {
         modelPath: 'models/tiny.tflite',
         requestedBackend: 'auto',
@@ -70,8 +74,9 @@ describe('createRuntimePathProof', () => {
 
     expect(proof).toMatchObject({
       modelId: 'tiny-model',
-      requestedBackend: 'auto',
-      resolvedBackend: 'webgpu',
+      selectedBackend: 'auto',
+      mainGraphRequestedBackend: 'auto',
+      mainGraphResolvedBackend: 'webgpu',
       compileDurationMs: 12,
       fallbackCount: 0,
       outputCount: 2,
@@ -80,26 +85,153 @@ describe('createRuntimePathProof', () => {
         backends: ['webgpu'],
       },
     })
+    expect(proof?.graphBackends).toEqual([
+      {
+        graph: 'main',
+        modelPath: 'models/tiny.tflite',
+        requestedBackend: 'auto',
+        resolvedBackend: 'webgpu',
+        fallbackCount: 0,
+      },
+    ])
     expect(proof?.inferenceEvents).toHaveLength(1)
   })
 
-  it('preserves every graph event instead of flattening a multi-graph run', () => {
+  it('records a correctness override as selection → runtime request → resolution, not as fallback', () => {
     const proof = createRuntimePathProof({
       adapter,
-      requestedBackend: 'auto',
-      modelInfo: null,
+      selectedBackend: 'webgpu',
+      modelInfo: {
+        modelPath: 'models/tiny.tflite',
+        requestedBackend: 'wasm',
+        resolvedBackend: 'wasm',
+        compileDurationMs: 10,
+        fallbackCount: 0,
+      },
       telemetry: [
-        event({ modelPath: 'models/encoder.tflite', resolvedBackend: 'webgpu', inferenceDurationMs: 8 }),
-        event({ modelPath: 'models/decoder.tflite', resolvedBackend: 'wasm', inferenceDurationMs: 15, fallbackCount: 1 }),
+        event({ requestedBackend: 'wasm', resolvedBackend: 'wasm', fallbackCount: 0 }),
       ],
       telemetryStart: 0,
       outputCount: 1,
       capturedAt: '2026-09-17T20:01:00.000Z',
     })
 
-    expect(proof?.inferenceEvents.map((entry) => [entry.modelPath, entry.resolvedBackend])).toEqual([
-      ['models/encoder.tflite', 'webgpu'],
-      ['models/decoder.tflite', 'wasm'],
+    expect(proof).toMatchObject({
+      selectedBackend: 'webgpu',
+      mainGraphRequestedBackend: 'wasm',
+      mainGraphResolvedBackend: 'wasm',
+      fallbackCount: 0,
+    })
+    expect(proof?.graphBackends[0]).toMatchObject({
+      graph: 'main',
+      requestedBackend: 'wasm',
+      resolvedBackend: 'wasm',
+      fallbackCount: 0,
+    })
+  })
+
+  it('does not borrow a subgraph backend for missing main-graph proof', () => {
+    const proof = createRuntimePathProof({
+      adapter,
+      selectedBackend: 'webgpu',
+      modelInfo: null,
+      telemetry: [
+        event({
+          modelPath: 'models/encoder.tflite',
+          requestedBackend: 'wasm',
+          resolvedBackend: 'wasm',
+          inferenceDurationMs: 10,
+        }),
+      ],
+      telemetryStart: 0,
+      outputCount: 1,
+      capturedAt: '2026-09-17T20:01:00.000Z',
+    })
+
+    expect(proof).toMatchObject({
+      mainGraphRequestedBackend: 'unknown',
+      mainGraphResolvedBackend: 'unknown',
+    })
+    expect(proof?.graphBackends[0]).toMatchObject({
+      graph: 'encoder',
+      requestedBackend: 'wasm',
+      resolvedBackend: 'wasm',
+    })
+  })
+
+  it('preserves each graph path and aggregates one fallback count per graph', () => {
+    const proof = createRuntimePathProof({
+      adapter,
+      selectedBackend: 'webgpu',
+      modelInfo: null,
+      telemetry: [
+        event({
+          modelPath: 'models/tiny.tflite',
+          requestedBackend: 'webgpu',
+          resolvedBackend: 'webgpu',
+          inferenceDurationMs: 8,
+        }),
+        event({
+          modelPath: 'models/encoder.tflite',
+          requestedBackend: 'wasm',
+          resolvedBackend: 'wasm',
+          inferenceDurationMs: 10,
+          fallbackCount: 0,
+        }),
+        event({
+          modelPath: 'models/decoder.tflite',
+          requestedBackend: 'wasm',
+          resolvedBackend: 'webgpu',
+          inferenceDurationMs: 15,
+          fallbackCount: 1,
+        }),
+        // A repeated decoder invocation must not double-count its compile fallback.
+        event({
+          modelPath: 'models/decoder.tflite',
+          requestedBackend: 'wasm',
+          resolvedBackend: 'webgpu',
+          inferenceDurationMs: 14,
+          fallbackCount: 1,
+        }),
+      ],
+      telemetryStart: 0,
+      outputCount: 1,
+      capturedAt: '2026-09-17T20:01:00.000Z',
+    })
+
+    expect(proof?.graphBackends).toEqual([
+      {
+        graph: 'main',
+        modelPath: 'models/tiny.tflite',
+        requestedBackend: 'webgpu',
+        resolvedBackend: 'webgpu',
+        fallbackCount: 0,
+      },
+      {
+        graph: 'encoder',
+        modelPath: 'models/encoder.tflite',
+        requestedBackend: 'wasm',
+        resolvedBackend: 'wasm',
+        fallbackCount: 0,
+      },
+      {
+        graph: 'decoder',
+        modelPath: 'models/decoder.tflite',
+        requestedBackend: 'wasm',
+        resolvedBackend: 'webgpu',
+        fallbackCount: 1,
+      },
+    ])
+    expect(proof?.fallbackCount).toBe(1)
+    expect(proof?.inferenceEvents.map((entry) => [
+      entry.graph,
+      entry.requestedBackend,
+      entry.resolvedBackend,
+    ])).toEqual([
+      ['main', 'webgpu', 'webgpu'],
+      ['encoder', 'wasm', 'wasm'],
+      ['decoder', 'wasm', 'webgpu'],
+      ['decoder', 'wasm', 'webgpu'],
     ])
   })
 })

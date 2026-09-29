@@ -8,7 +8,8 @@ export const moViNetManifest: ModelManifest = {
   name: 'MoViNet-A0-Stream',
   version: '1.0.0',
   capabilities: ['image-classification'],
-  backends: { webgpu: true, wasm: true },
+  // Exact-artifact LiteRT.js 2.5.3 sweep: WebGPU runs but its output does not match WASM.
+  backends: { webgpu: false, wasm: true },
   memory: { downloadBytes: 2_500_000, residentBytes: 4_000_000 },
   assets: [{ id: 'model', path: MODEL_URL, role: 'model' }],
   verification: {
@@ -19,8 +20,7 @@ export const moViNetManifest: ModelManifest = {
     qualification: 'limited',
     upstreamRevision: 'c2ceda0efa7344ba5a95c3eeaa9925cb0940e453',
     environments: [
-      { browser: 'CI contract tests', backend: 'webgpu', runtime: 'manifest-only' },
-      { browser: 'CI contract tests', backend: 'wasm', runtime: 'manifest-only' },
+      { browser: 'Chromium 151 (external sweep)', backend: 'wasm', runtime: '@litertjs/core 2.5.3; edge-compat 2026-08-11 sweep; WebGPU output mismatch' },
     ],
     expectedOutput: {
       preprocessing: [

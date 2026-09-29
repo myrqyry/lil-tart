@@ -346,7 +346,7 @@ export const crepeAdapter: ModelAdapter = {
       for (const value of input) variance += (value - mean) ** 2
       const std = Math.max(Math.sqrt(variance / CREPE_FRAME), 1e-10)
       for (let i = 0; i < CREPE_FRAME; i++) input[i] = (input[i] - mean) / std
-      const out = await ctx.predict('main', { input: ctx.createTensor(input, [1, CREPE_FRAME]) })
+      const out = await ctx.predict('main', [ctx.createTensor(input, [1, CREPE_FRAME])])
       const activation = (await Object.values(out)[0].data()) as Float32Array
       const decoded = decodePitch(activation)
       hz.push(Number(decoded.hz.toFixed(1)))

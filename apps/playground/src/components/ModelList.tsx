@@ -1,5 +1,25 @@
 import { useMemo, useState } from 'react'
-import type { ModelAdapter, VerificationStatus } from '../adapters/types'
+import {
+  ArrowRightUpRegular,
+  Camera2Regular,
+  Delete2Regular,
+  Download2Regular,
+  Eye2Regular,
+  Grid2Regular,
+  Loading3Regular,
+  AudioTapeRegular,
+  HeadphoneRegular,
+  Message1Regular,
+  MicRegular,
+  Music2Regular,
+  PlayRegular,
+  PowerRegular,
+  RouteRegular,
+  SoundLineRegular,
+  SpeakerRegular,
+  SubtitleRegular,
+} from '@mingcute/react/core-regular'
+import type { ModelAdapter } from '../adapters/types'
 
 interface StoredModelSummary {
   bytes: number
@@ -55,13 +75,6 @@ const FILTER_COLOR_CLASS: Record<ModelFamily, string> = {
   Other: 'text-type-other',
 }
 
-const VERIFICATION_LABELS: Partial<Record<VerificationStatus, string>> = {
-  'compile-verified': 'Compile verified',
-  'inference-verified': 'Inference verified',
-  'output-verified': 'Output verified',
-  'manually-verified': 'Manually verified',
-}
-
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B'
   const k = 1024
@@ -73,161 +86,6 @@ function formatBytes(bytes: number): string {
 function progressPercent(progress: { loadedBytes: number; totalBytes?: number } | null): number {
   if (!progress || !progress.totalBytes) return 0
   return Math.min(100, Math.round((progress.loadedBytes / progress.totalBytes) * 100))
-}
-
-function FamilyGlyph({ family, className = '' }: { family: ModelFamily; className?: string }) {
-  const common = {
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 1.8,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    className,
-    'aria-hidden': true,
-  }
-
-  if (family === 'Speech & audio') {
-    return (
-      <svg {...common}>
-        <path d="M4 13v-2M8 16V8m4 11V5m4 11V8m4 5v-2" />
-      </svg>
-    )
-  }
-
-  if (family === 'Vision & image') {
-    return (
-      <svg {...common}>
-        <path d="M2.8 12s3.2-5.4 9.2-5.4S21.2 12 21.2 12 18 17.4 12 17.4 2.8 12 2.8 12Z" />
-        <circle cx="12" cy="12" r="2.8" />
-      </svg>
-    )
-  }
-
-  if (family === 'Language') {
-    return (
-      <svg {...common}>
-        <path d="M5 5.5h14a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7l-4.5 3v-3H5a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2Z" />
-        <path d="M7 9h10M7 12.5h7" />
-      </svg>
-    )
-  }
-
-  if (family === 'Pipelines') {
-    return (
-      <svg {...common}>
-        <circle cx="6" cy="6" r="2" />
-        <circle cx="18" cy="6" r="2" />
-        <circle cx="12" cy="18" r="2" />
-        <path d="M7.7 7.1 10.8 16M16.3 7.1 13.2 16M8 6h8" />
-      </svg>
-    )
-  }
-
-  return (
-    <svg {...common}>
-      <rect x="4" y="4" width="6" height="6" rx="1.5" />
-      <rect x="14" y="4" width="6" height="6" rx="1.5" />
-      <rect x="4" y="14" width="6" height="6" rx="1.5" />
-      <path d="M17 14v6m-3-3h6" />
-    </svg>
-  )
-}
-
-function ImageFrameGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <rect x="3.5" y="4" width="17" height="16" rx="3" />
-      <circle cx="9" cy="9" r="1.5" />
-      <path d="m6 17 4-4 3 3 2.5-2.5L18 16" />
-    </svg>
-  )
-}
-
-function producesImage(adapter: ModelAdapter): boolean {
-  const tags = new Set(adapter.metadata.tags.map((tag) => tag.toLowerCase()))
-  const searchable = `${adapter.metadata.name} ${adapter.metadata.description}`.toLowerCase()
-
-  return (
-    hasAny(tags, [
-      'generative',
-      'generation',
-      'image-generation',
-      'creative',
-      'restoration',
-      'inpainting',
-      'denoising',
-      'super-resolution',
-      'style-transfer',
-      'stylization',
-    ]) ||
-    /generat|restor|inpaint|denois|super[- ]?resolution|style transfer|styliz|esrgan|gfpgan|nafnet|swinir/.test(searchable)
-  )
-}
-
-function ModelGlyph({
-  adapter,
-  family,
-  className = '',
-}: {
-  adapter: ModelAdapter
-  family: ModelFamily
-  className?: string
-}) {
-  if (family === 'Vision & image' && producesImage(adapter)) {
-    return <ImageFrameGlyph className={className} />
-  }
-  return <FamilyGlyph family={family} className={className} />
-}
-
-function FilterGlyph({ filter, className = '' }: { filter: ModelFilter; className?: string }) {
-  if (FAMILY_ORDER.includes(filter as ModelFamily)) {
-    return <FamilyGlyph family={filter as ModelFamily} className={className} />
-  }
-
-  if (filter === 'Downloaded') {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className={className}
-        aria-hidden
-      >
-        <path d="M12 4v10m-4-4 4 4 4-4M5 19h14" />
-      </svg>
-    )
-  }
-
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <rect x="4" y="4" width="6" height="6" rx="1.5" />
-      <rect x="14" y="4" width="6" height="6" rx="1.5" />
-      <rect x="4" y="14" width="6" height="6" rx="1.5" />
-      <rect x="14" y="14" width="6" height="6" rx="1.5" />
-    </svg>
-  )
 }
 
 function hasAny(tags: Set<string>, values: readonly string[]): boolean {
@@ -258,37 +116,78 @@ function familyFor(adapter: ModelAdapter): ModelFamily {
   return 'Other'
 }
 
+function producesImage(adapter: ModelAdapter): boolean {
+  const tags = new Set(adapter.metadata.tags.map((tag) => tag.toLowerCase()))
+  const searchable = `${adapter.metadata.name} ${adapter.metadata.description}`.toLowerCase()
 
-function DownloadGlyph({ className = '' }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M12 4v10m-4-4 4 4 4-4M5 19h14" />
-    </svg>
+    hasAny(tags, [
+      'generative',
+      'generation',
+      'image-generation',
+      'creative',
+      'restoration',
+      'inpainting',
+      'denoising',
+      'super-resolution',
+      'style-transfer',
+      'stylization',
+    ]) ||
+    /generat|restor|inpaint|denois|super[- ]?resolution|style transfer|styliz|esrgan|gfpgan|nafnet|swinir/.test(searchable)
   )
 }
 
-function CheckGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="m5 12.5 4.2 4.2L19 7" />
-    </svg>
-  )
+function AudioGlyph({ adapter, className = '' }: { adapter?: ModelAdapter; className?: string }) {
+  if (!adapter) return <HeadphoneRegular className={className} />
+
+  const tags = new Set(adapter.metadata.tags.map((tag) => tag.toLowerCase()))
+  const searchable = `${adapter.metadata.name} ${adapter.metadata.description}`.toLowerCase()
+
+  if (tags.has('music') || /music transcription|music generation|musiccoca/.test(searchable)) {
+    return <Music2Regular className={className} />
+  }
+  if (tags.has('tts') || /text[- ]?to[- ]?speech|speech synthesis|synthesized audio/.test(searchable)) {
+    return <SpeakerRegular className={className} />
+  }
+  if (tags.has('codec') || /codec|mimi/.test(searchable)) {
+    return <AudioTapeRegular className={className} />
+  }
+  if (tags.has('asr') || /speech recognition|speech[- ]?to[- ]?text|whisper|moonshine|parakeet|granite speech/.test(searchable)) {
+    return <SubtitleRegular className={className} />
+  }
+  if (tags.has('keyword-spotting') || /keyword spotting|voice activity/.test(searchable)) {
+    return <MicRegular className={className} />
+  }
+  if (tags.has('pitch') || tags.has('tuner') || tags.has('tagging') || /pitch|audioset|audio tagging|audio classification/.test(searchable)) {
+    return <SoundLineRegular className={className} />
+  }
+  return <HeadphoneRegular className={className} />
 }
 
-function OpenGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M7 17 17 7M9 7h8v8" />
-    </svg>
-  )
+function FamilyGlyph({
+  adapter,
+  family,
+  className = '',
+}: {
+  adapter?: ModelAdapter
+  family: ModelFamily
+  className?: string
+}) {
+  if (family === 'Pipelines') return <RouteRegular className={className} />
+  if (family === 'Language') return <Message1Regular className={className} />
+  if (family === 'Speech & audio') return <AudioGlyph adapter={adapter} className={className} />
+  if (family === 'Vision & image') {
+    return adapter && producesImage(adapter)
+      ? <Camera2Regular className={className} />
+      : <Eye2Regular className={className} />
+  }
+  return <Grid2Regular className={className} />
 }
 
-function SpinnerGlyph({ className = '' }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className={className} aria-hidden>
-      <path d="M21 12a9 9 0 1 1-6.2-8.6" />
-    </svg>
-  )
+function FilterGlyph({ filter, className = '' }: { filter: ModelFilter; className?: string }) {
+  if (filter === 'All') return <Grid2Regular className={className} />
+  if (filter === 'Downloaded') return <Download2Regular className={className} />
+  return <FamilyGlyph family={filter as ModelFamily} className={className} />
 }
 
 export default function ModelList({
@@ -363,7 +262,7 @@ export default function ModelList({
               onClick={() => setActiveFilter(filter)}
               aria-label={FILTER_LABELS[filter]}
               title={FILTER_LABELS[filter]}
-              className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[13px] font-medium transition-all ${
+              className={`filter-chip flex shrink-0 items-center gap-1.5 px-2.5 py-1.5 text-[13px] font-medium ${
                 active
                   ? family
                     ? `border-current bg-surface-container-high ${FILTER_COLOR_CLASS[family]}`
@@ -394,25 +293,41 @@ export default function ModelList({
           const isLoaded = loadedModelId === adapter.modelId
           const stored = storedModels.get(adapter.modelId)
           const isUnavailable = !!adapter.disabled
-          const verificationStatus = adapter.verification?.status ?? 'registered'
-          const verificationLabel = VERIFICATION_LABELS[verificationStatus]
+          const verificationStatus = adapter.verification?.status?.replace(/-/g, ' ')
+
           const handleCornerAction = () => {
             if (isUnavailable || isLoading) return
             if (adapter.isPipeline) {
               onOpenPipeline?.(adapter.modelId)
               return
             }
-            if (stored) return
-            onLoad(adapter)
+            if (!stored) {
+              onLoad(adapter)
+              return
+            }
+            if (isLoaded) onUnload(adapter)
+            else onLoad(adapter)
           }
 
           const cornerActionLabel = adapter.isPipeline
             ? `Open ${adapter.metadata.name}`
             : isLoading
               ? `Downloading ${adapter.metadata.name}`
+              : !stored
+                ? `Download ${adapter.metadata.name}`
+                : isLoaded
+                  ? `Unload ${adapter.metadata.name}`
+                  : `Load ${adapter.metadata.name}`
+
+          const status = isUnavailable
+            ? 'Unavailable'
+            : isLoaded
+              ? 'Loaded'
               : stored
-                ? `${adapter.metadata.name} is downloaded`
-                : `Download ${adapter.metadata.name}`
+                ? `${formatBytes(stored.bytes)} local`
+                : isSelected
+                  ? 'Selected'
+                  : null
 
           return (
             <article
@@ -426,130 +341,84 @@ export default function ModelList({
                 title={FILTER_LABELS[family]}
                 aria-label={FILTER_LABELS[family]}
               >
-                <ModelGlyph adapter={adapter} family={family} className="h-3.5 w-3.5" />
+                <FamilyGlyph adapter={adapter} family={family} className="h-3.5 w-3.5" />
               </span>
 
               <button
                 type="button"
                 onClick={handleCornerAction}
-                disabled={isUnavailable || isLoading || !!stored || (!!disabled && !adapter.isPipeline)}
+                disabled={isUnavailable || isLoading || (!!disabled && !adapter.isPipeline)}
                 aria-label={cornerActionLabel}
                 title={cornerActionLabel}
                 className="model-card__notch model-card__notch--action"
               >
                 {isLoading ? (
-                  <SpinnerGlyph className="h-3.5 w-3.5 animate-spin" />
+                  <Loading3Regular className="h-3.5 w-3.5 animate-spin" />
                 ) : adapter.isPipeline ? (
-                  <OpenGlyph className="h-3.5 w-3.5" />
-                ) : stored ? (
-                  <CheckGlyph className="h-3.5 w-3.5" />
+                  <ArrowRightUpRegular className="h-3.5 w-3.5" />
+                ) : !stored ? (
+                  <Download2Regular className="h-3.5 w-3.5" />
+                ) : isLoaded ? (
+                  <PowerRegular className="h-3.5 w-3.5" />
                 ) : (
-                  <DownloadGlyph className="h-3.5 w-3.5" />
+                  <PlayRegular className="h-3.5 w-3.5" />
                 )}
               </button>
 
               <button
                 type="button"
-                onClick={() => !isUnavailable && onSelect(adapter)}
-                disabled={isUnavailable && !isSelected}
-                className="block w-full flex-1 px-2.5 pb-2 pt-7 text-left disabled:opacity-55"
+                onClick={() => onSelect(adapter)}
+                aria-label={`${adapter.metadata.name}. ${isUnavailable ? 'Unavailable for execution; ' : ''}${verificationStatus ? 'Verification: ' + verificationStatus + '. ' : ''}Select to inspect details.`}
+                title={`${isUnavailable ? 'Unavailable for execution · ' : ''}${verificationStatus ? 'Verification: ' + verificationStatus : 'Inspect model details'}`}
+                className={`block w-full flex-1 px-2.5 pt-11 text-left ${isLoading ? 'pb-10' : 'pb-2.5'}`}
               >
-                <p className="break-words text-[15px] font-semibold leading-[1.2] text-on-surface">
+                <p className="model-card__title break-words text-[15px] font-semibold leading-[1.2] text-on-surface">
                   {adapter.metadata.name}
                 </p>
-                <p className="mt-1 text-[13px] leading-[1.28] text-on-surface-variant">
+                <p className="model-card__description mt-1 text-[13px] leading-[1.28] text-on-surface-variant">
                   {adapter.metadata.description}
                 </p>
+                <div className="mt-2 flex min-h-4 items-center gap-1.5 pr-7 text-[11px]">
+                  {status && (
+                    <span className={isLoaded ? 'font-medium text-tertiary' : isUnavailable ? 'text-on-surface-muted' : 'text-on-surface-variant'}>
+                      {status}
+                    </span>
+                  )}
+                  {verificationStatus && (
+                    <span className="truncate text-[10px] text-on-surface-muted">· {verificationStatus}</span>
+                  )}
+                </div>
               </button>
 
-              {isSelected && (
-                <div className="px-2.5 pb-2">
-                  <div className="flex flex-wrap items-center gap-1 text-xs">
-                    {adapter.metadata.tags.slice(0, 5).map((tag) => (
-                      <span key={tag} className="rounded-md bg-surface-container-high px-1.5 py-0.5 text-on-surface-variant">
-                        {tag}
-                      </span>
-                    ))}
-                    {stored && (
-                      <span className="rounded-md bg-secondary-container/70 px-1.5 py-0.5 text-on-secondary-container">
-                        {formatBytes(stored.bytes)} stored
-                      </span>
-                    )}
-                  </div>
-
-                  <details className="mt-1.5 rounded-md bg-surface/45 px-2 py-1.5 text-xs text-on-surface-variant">
-                    <summary className="cursor-pointer select-none font-medium text-on-surface-muted">
-                      Details
-                    </summary>
-                    <div className="mt-2 space-y-2">
-                      <div>
-                        <p className="uppercase tracking-wide text-on-surface-muted">Model id</p>
-                        <p className="mt-0.5 break-all font-mono">{adapter.modelId}</p>
-                      </div>
-                      <div>
-                        <p className="uppercase tracking-wide text-on-surface-muted">Asset</p>
-                        <p className="mt-0.5 break-all font-mono">{adapter.metadata.modelPath}</p>
-                      </div>
-                      {(verificationLabel || adapter.verification?.backends?.length) && (
-                        <div className="flex flex-wrap gap-1.5 pt-1">
-                          {verificationLabel && (
-                            <span className="rounded-md bg-tertiary-container/70 px-1.5 py-0.5 text-on-tertiary-container">
-                              {verificationLabel}
-                            </span>
-                          )}
-                          {adapter.verification?.backends?.map((backend) => (
-                            <span key={backend} className="rounded-md bg-surface-container-highest px-1.5 py-0.5">
-                              {backend.toUpperCase()}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </details>
-                </div>
+              {stored && !isLoaded && !isLoading && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveStored(adapter.modelId)}
+                  disabled={storageBusy || disabled}
+                  aria-label={`Remove downloaded files for ${adapter.metadata.name}`}
+                  title="Remove downloaded files"
+                  className="absolute bottom-2 right-2 z-10 inline-flex h-6 w-6 items-center justify-center rounded-full text-on-surface-muted transition-transform hover:scale-110 hover:bg-error-container/25 hover:text-error active:scale-90 disabled:opacity-40"
+                >
+                  <Delete2Regular className="h-3.5 w-3.5" />
+                </button>
               )}
 
               {isLoading && downloadProgress && (
-                <div className="px-2.5 pb-1.5">
-                  <div className="h-1.5 overflow-hidden rounded-full bg-outline-variant">
+                <div className="absolute inset-x-2.5 bottom-1.5">
+                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-on-surface-muted">
+                    <span>{progressPercent(downloadProgress)}%</span>
+                    <span>
+                      {formatBytes(downloadProgress.loadedBytes)}
+                      {downloadProgress.totalBytes ? ' / ' + formatBytes(downloadProgress.totalBytes) : ''}
+                    </span>
+                  </div>
+                  <div className="h-1 overflow-hidden rounded-full bg-outline-variant">
                     <div
                       className="h-full rounded-full bg-primary transition-all duration-300"
                       style={{ width: `${progressPercent(downloadProgress)}%` }}
                     />
                   </div>
-                  <p className="mt-1 text-xs text-on-surface-variant">
-                    {downloadProgress.totalBytes
-                      ? `${progressPercent(downloadProgress)}% · ${formatBytes(downloadProgress.loadedBytes)} / ${formatBytes(downloadProgress.totalBytes)}`
-                      : formatBytes(downloadProgress.loadedBytes)}
-                  </p>
                 </div>
-              )}
-
-              {isSelected && !adapter.isPipeline && stored && (
-                <div className="flex items-center gap-2 px-2.5 pb-2 text-xs">
-                  <span className={isLoaded ? 'text-tertiary' : 'text-secondary'}>
-                    {isLoaded ? 'Loaded in memory' : 'Downloaded'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => isLoaded ? onUnload(adapter) : onLoad(adapter)}
-                    disabled={disabled}
-                    className="ml-auto rounded-md border border-outline-variant px-2 py-1 text-xs font-medium text-on-surface hover:bg-surface-container-high disabled:opacity-45"
-                  >
-                    {isLoaded ? 'Unload' : 'Load'}
-                  </button>
-                </div>
-              )}
-
-              {isSelected && stored && !adapter.isPipeline && (
-                <button
-                  type="button"
-                  onClick={() => onRemoveStored(adapter.modelId)}
-                  disabled={storageBusy || disabled}
-                  className="mx-2.5 mb-2 text-left text-xs font-medium text-error transition-opacity hover:opacity-80 disabled:opacity-40"
-                >
-                  Remove downloaded files
-                </button>
               )}
             </article>
           )

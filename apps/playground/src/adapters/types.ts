@@ -30,6 +30,7 @@ export type VerificationStatus =
   | 'manually-verified'
 
 export type VerificationBackend = 'wasm' | 'webgpu' | 'webnn' | 'native'
+export type BrowserVerificationBackend = Exclude<VerificationBackend, 'native'>
 
 /**
  * Durable evidence for a model adapter. Runtime success in the current browser session
@@ -50,6 +51,8 @@ export interface ModelVerification {
 export interface ModelGraph {
   name: string
   modelPath: string
+  /** Browser backend required by measured correctness evidence for this graph. */
+  requiredBackend?: BrowserVerificationBackend
 }
 
 /** Passed to `ModelAdapter.run`; routes each graph through the same loaded runtime. */
@@ -74,6 +77,8 @@ export interface ModelAdapter {
   isPipeline?: true
   /** ponytail: no browser-fetchable .tflite yet (verify via HEAD 200 CORS *). UI disables the entry. */
   disabled?: boolean
+  /** Browser backend required by measured correctness evidence for the main graph. */
+  requiredBackend?: BrowserVerificationBackend
   /** ponytail: multi-graph models; every graph is loaded and driven from `run`. */
   graphs?: ModelGraph[]
   /** ponytail: when present, replaces the single-graph predict path in `runInference`. */

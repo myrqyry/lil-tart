@@ -1,8 +1,13 @@
-import type { RuntimeOperation } from './runtimePathProof'
+import type { RuntimeOperation, RuntimePathGraphBackend } from './runtimePathProof'
 
 export type TartGuideTone = 'idle' | 'working' | 'success' | 'warning' | 'error'
 
 export type TartGuideAction = 'preflight'
+
+export interface TartGuideBackendOverride {
+  graph: string
+  backend: string
+}
 
 export interface TartGuideSnapshot {
   selectedModelName: string | null
@@ -12,6 +17,8 @@ export interface TartGuideSnapshot {
   error: string | null
   requestedBackend: string | null
   resolvedBackend: string | null
+  backendOverrides: readonly TartGuideBackendOverride[]
+  runtimeGraphBackends: readonly RuntimePathGraphBackend[]
   fallbackCount: number
   preflightComplete: boolean
   pathProofAvailable: boolean
@@ -30,8 +37,14 @@ function backendLabel(value: string | null): string {
   return value ? value.toUpperCase() : 'the available backend'
 }
 
-function plural(value: number, singular: string, pluralForm = `${singular}s`): string {
+function plural(value: number, singular: string, pluralForm = singular + 's'): string {
   return value === 1 ? singular : pluralForm
+}
+
+function overrideList(overrides: readonly TartGuideBackendOverride[]): string {
+  return overrides
+    .map(({ graph, backend }) => graph + ' → ' + backendLabel(backend))
+    .join(', ')
 }
 
 export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessage {
@@ -47,14 +60,14 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
   if (snapshot.operation === 'model-load') {
     const progress = snapshot.progressPercent === null
       ? ''
-      : ` ${snapshot.progressPercent}%`
+      : ' ' + snapshot.progressPercent + '%'
     return {
       tone: 'working',
       kicker: 'Model oven',
       title: snapshot.selectedModelName
-        ? `Warming up ${snapshot.selectedModelName}`
+        ? 'Warming up ' + snapshot.selectedModelName
         : 'Warming the oven',
-      message: `Fetching and compiling the model${progress}. I’ll keep an eye on the runtime while it gets ready.`,
+      message: 'Fetching and compiling the model' + progress + '. I’ll keep an eye on the runtime while it gets ready.',
     }
   }
 
@@ -63,7 +76,7 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
       tone: 'working',
       kicker: 'Runtime check',
       title: 'Running preflight.',
-      message: 'The model is already loaded. I’m checking compile + synthetic inference on the resolved runtime path now.',
+      message: 'The model is already loaded. I’m checking compile + synthetic inference on the main graph now.',
     }
   }
 
@@ -72,7 +85,9 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
       tone: 'working',
       kicker: 'Real inference',
       title: 'Running your input.',
-      message: `The loaded model is executing on ${backendLabel(snapshot.resolvedBackend)}. If it completes, I’ll capture the emitted runtime events as session proof.`,
+      message: snapshot.backendOverrides.length > 0
+        ? 'The pipeline is executing with explicit graph backend constraints (' + overrideList(snapshot.backendOverrides) + '). If it completes, the session proof will preserve each graph’s requested and resolved backend.'
+        : 'The loaded graph path is executing now. If it completes, I’ll capture each emitted runtime event as session proof.',
     }
   }
 
@@ -85,27 +100,53 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
     }
   }
 
+  if (snapshot.loaded && snapshot.backendOverrides.length > 0) {
+    const selected = backendLabel(snapshot.requestedBackend)
+    const overrides = overrideList(snapshot.backendOverrides)
+    const fallbackMessage = snapshot.fallbackCount > 0
+      ? snapshot.pathProofAvailable
+        ? ' After those explicit graph requests, the runtime also took ' + snapshot.fallbackCount + ' ' + plural(snapshot.fallbackCount, 'fallback') + '; that fallback evidence is preserved per graph in the session proof.'
+        : ' The main graph has also reported ' + snapshot.fallbackCount + ' ' + plural(snapshot.fallbackCount, 'fallback') + ' so far; the per-graph split will not exist until a real inference completes.'
+      : ' Those are direct correctness requests, not runtime fallbacks.'
+
+    return {
+      tone: 'warning',
+      kicker: 'Correctness override',
+      title: snapshot.backendOverrides.length === 1
+        ? 'This model has a correctness-pinned graph.'
+        : 'This model has correctness-pinned graphs.',
+      message: 'You selected ' + selected + '. Lil Tart overrides ' + overrides + '.' + fallbackMessage,
+      action: snapshot.preflightComplete ? undefined : 'preflight',
+      actionLabel: snapshot.preflightComplete ? undefined : 'Run preflight',
+    }
+  }
+
   if (snapshot.loaded && snapshot.fallbackCount > 0) {
     const requested = backendLabel(snapshot.requestedBackend)
-    const resolved = backendLabel(snapshot.resolvedBackend)
+    const graphDetail = snapshot.runtimeGraphBackends.length > 1
+      ? ' across ' + snapshot.runtimeGraphBackends.length + ' graph paths'
+      : ''
     return {
       tone: 'warning',
       kicker: 'Runtime receipt',
-      title: 'It works, but we took a fallback.',
+      title: 'It works, but the runtime took a fallback.',
       message: snapshot.pathProofAvailable
-        ? `You asked for ${requested} and landed on ${resolved} with ${snapshot.fallbackCount} ${plural(snapshot.fallbackCount, 'fallback')}. The run completed and that fallback is preserved in the session proof; a recipe must not hide it.`
-        : `You asked for ${requested} and landed on ${resolved} with ${snapshot.fallbackCount} ${plural(snapshot.fallbackCount, 'fallback')}. It can still run, but this is worth checking before you ship it.`,
+        ? requested + ' was selected and the runtime recorded ' + snapshot.fallbackCount + ' ' + plural(snapshot.fallbackCount, 'fallback') + graphDetail + '. The session proof preserves each graph’s requested and resolved backend; a recipe must not hide it.'
+        : requested + ' was selected and the runtime recorded ' + snapshot.fallbackCount + ' ' + plural(snapshot.fallbackCount, 'fallback') + '. It can still run, but this is worth checking before you ship it.',
       action: snapshot.preflightComplete ? undefined : 'preflight',
       actionLabel: snapshot.preflightComplete ? undefined : 'Run preflight',
     }
   }
 
   if (snapshot.pathProofAvailable) {
+    const graphMessage = snapshot.runtimeGraphBackends.length > 1
+      ? ' across ' + snapshot.runtimeGraphBackends.length + ' graph paths'
+      : ''
     return {
       tone: 'success',
       kicker: 'Inference complete',
       title: 'That’s a real working path. ✨',
-      message: `The model just ran locally on ${backendLabel(snapshot.resolvedBackend)}, and I captured the runtime events that prove this session path. That proof can now feed an “add this to my app” recipe without guessing from UI state.`,
+      message: 'The model just ran locally' + graphMessage + ', and I captured the requested and resolved backend for every inference graph. That proof can now feed an “add this to my app” recipe without guessing from UI state.',
     }
   }
 
@@ -113,8 +154,8 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
     return {
       tone: 'success',
       kicker: 'Preflight passed',
-      title: 'The model is alive.',
-      message: `Compile + synthetic inference succeeded on ${backendLabel(snapshot.resolvedBackend)}. Feed it real input next; we’ve already proven the runtime path works.`,
+      title: 'The main graph is alive.',
+      message: 'Compile + synthetic inference succeeded on the main graph via ' + backendLabel(snapshot.resolvedBackend) + '. Feed it real input next so multi-graph adapters can prove the rest of their runtime path too.',
     }
   }
 
@@ -122,8 +163,8 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
     return {
       tone: 'success',
       kicker: 'Model ready',
-      title: `${snapshot.selectedModelName} is warm.`,
-      message: `Resolved to ${backendLabel(snapshot.resolvedBackend)}. Run a preflight before real input so we can prove the graph and output path together.`,
+      title: snapshot.selectedModelName + ' is warm.',
+      message: 'The main graph resolved to ' + backendLabel(snapshot.resolvedBackend) + '. Run real input to capture the complete per-graph runtime path.',
       action: 'preflight',
       actionLabel: 'Run preflight',
     }
@@ -132,7 +173,7 @@ export function getTartGuideMessage(snapshot: TartGuideSnapshot): TartGuideMessa
   return {
     tone: 'idle',
     kicker: 'Lil Tart guide',
-    title: `${snapshot.selectedModelName} is selected.`,
+    title: snapshot.selectedModelName + ' is selected.',
     message: 'Load the model and I’ll stay with the runtime instead of giving you generic setup advice.',
   }
 }

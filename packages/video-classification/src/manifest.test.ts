@@ -6,11 +6,15 @@ describe('MoViNet manifest', () => {
     expect(moViNetManifest.assets).toEqual([
       expect.objectContaining({ id: 'model', role: 'model' }),
     ]);
+    expect(moViNetManifest.backends).toEqual({ webgpu: false, wasm: true });
     expect(moViNetManifest.verification).toMatchObject({
+      assets: 'untested',
+      compile: 'untested',
+      inference: 'untested',
+      output: 'untested',
       qualification: 'limited',
       upstreamRevision: 'c2ceda0efa7344ba5a95c3eeaa9925cb0940e453',
       environments: [
-        expect.objectContaining({ backend: 'webgpu' }),
         expect.objectContaining({ backend: 'wasm' }),
       ],
       expectedOutput: {
@@ -22,6 +26,10 @@ describe('MoViNet manifest', () => {
         },
       },
     });
+    const environment = moViNetManifest.verification?.environments?.[0];
+    expect(environment?.runtime).toContain('edge-compat 2026-08-11 sweep');
+    expect(environment?.runtime).toContain('WebGPU output mismatch');
+    expect(environment?.runtime).not.toContain('measured pass');
   });
 
   it('describes preprocessing and score behavior as JSON data', () => {

@@ -288,6 +288,7 @@ export const voyageEmbedAdapter = makeEmbeddingAdapter({
   signaturePrefix: 'embed',
   queryPrefix: 'Represent the query for retrieving supporting documents: ',
   documentPrefix: 'Represent the document for retrieval: ',
+  padId: 151643,
 })
 
 export const nemotronEmbedAdapter = makeEmbeddingAdapter({
@@ -303,6 +304,7 @@ export const nemotronEmbedAdapter = makeEmbeddingAdapter({
   signaturePrefix: 'embed',
   queryPrefix: 'query: ',
   documentPrefix: 'passage: ',
+  padId: 11,
 })
 
 export const harrierEmbedAdapter = makeEmbeddingAdapter({
@@ -317,6 +319,7 @@ export const harrierEmbedAdapter = makeEmbeddingAdapter({
   pool: 'cls',
   signaturePrefix: 'embed',
   queryPrefix: 'Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: ',
+  padId: 151643,
 })
 
 export const lfm2Encoder350Adapter = makeEmbeddingAdapter({

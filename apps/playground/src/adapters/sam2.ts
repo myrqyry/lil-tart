@@ -4,7 +4,7 @@ import { normalizeAndFormatImageData, resizeImageData, tensorToImageData } from 
 
 export const sam2EncoderAdapter: ModelAdapter = {
   modelId: 'sam2-encoder',
-  metadata: { name: 'SAM2 — Image Encoder', description: 'SAM2.1 Hiera-Tiny image encoder (1024×1024)', modelPath: 'https://huggingface.co/litert-community/SAM2.1-Hiera-Tiny-Image-Encoder/resolve/main/sam2_tiny_image_encoder_fp16.tflite', tags: ['vision', 'segmentation'] },
+  metadata: { name: 'SAM2 — Image Encoder', description: 'SAM2.1 Hiera-Tiny image encoder (1024×1024)', modelPath: 'https://huggingface.co/litert-community/SAM2.1-Hiera-Tiny-Image-Encoder/resolve/main/sam2_tiny_image_encoder_v2_fp16.tflite', tags: ['vision', 'segmentation'] },
   inputSpecs: [
     { name: 'image', dtype: 'float32', shape: [1, 3, 1024, 1024], description: 'RGB ImageNet-normalized NCHW' },
   ],
@@ -33,16 +33,19 @@ export const sam2EncoderAdapter: ModelAdapter = {
 
 export const sam2DecoderAdapter: ModelAdapter = {
   modelId: 'sam2-decoder',
-  metadata: { name: 'SAM2 — Mask Decoder', description: 'SAM2.1 Hiera-Tiny mask decoder (promptable segmentation)', modelPath: 'https://huggingface.co/litert-community/SAM2.1-Hiera-Tiny-Mask-Decoder/resolve/main/sam2_tiny_mask_decoder_fp16.tflite', tags: ['vision', 'segmentation'] },
+  metadata: { name: 'SAM2 — Mask Decoder', description: 'SAM2.1 Hiera-Tiny mask decoder (promptable segmentation)', modelPath: 'https://huggingface.co/litert-community/SAM2.1-Hiera-Tiny-Mask-Decoder/resolve/main/sam2_tiny_mask_decoder_v2_fp16.tflite', tags: ['vision', 'segmentation'] },
+  // The graph contract is verified, but this component is not a usable standalone playground model:
+  // it needs encoder features plus host-side point encoding. Keep it unavailable until those steps are one pipeline.
+  disabled: true,
   inputSpecs: [
-    { name: 'image_embeddings', dtype: 'float32', shape: [1, 256, 64, 64], description: 'From SAM2 image encoder' },
+    { name: 'image_embeddings', dtype: 'float32', shape: [1, 256, 64, 64], description: 'From SAM2 image encoder v2' },
     { name: 'feat_s1', dtype: 'float32', shape: [1, 64, 128, 128], description: 'FPN feature s1 from encoder' },
     { name: 'feat_s0', dtype: 'float32', shape: [1, 32, 256, 256], description: 'FPN feature s0 from encoder' },
     { name: 'sparse_prompt', dtype: 'float32', shape: [1, 2, 256], description: 'Host-side prompt encoding (point coords + labels)' },
   ],
   outputSpecs: [
-    { name: 'masks', dtype: 'float32', shape: [1, 3, 256, 256], description: '3 mask predictions' },
-    { name: 'iou_predictions', dtype: 'float32', shape: [1, 3], description: 'IoU scores per mask' },
+    { name: 'pred_masks', dtype: 'float32', shape: [1, 3, 256, 256], description: '3 mask-logit predictions' },
+    { name: 'iou_scores', dtype: 'float32', shape: [1, 3], description: 'IoU scores per mask' },
   ],
   prepareInputs(values: Record<string, any>): Record<string, Tensor> {
     const out: Record<string, Tensor> = {}
@@ -62,8 +65,8 @@ export const sam2DecoderAdapter: ModelAdapter = {
     return out
   },
   async parseOutputs(outputs: Record<string, Tensor>): Promise<Record<string, any>> {
-    const masks = outputs['masks']
-    const iou = outputs['iou_predictions']
+    const masks = outputs['pred_masks']
+    const iou = outputs['iou_scores']
     if (!masks || !iou) throw new Error('Missing sam2-decoder outputs')
     const masksData = await masks.data() as Float32Array
     const iouData = await iou.data() as Float32Array
@@ -75,7 +78,7 @@ export const sam2DecoderAdapter: ModelAdapter = {
       const tensor = new Tensor(slice, [1, 1, 256, 256])
       masksOut.push(await tensorToImageData(tensor, 256, 256))
     }
-    return { masks: masksOut, iou_predictions: Array.from(iouData) }
+    return { pred_masks: masksOut, iou_scores: Array.from(iouData) }
   },
 }
 

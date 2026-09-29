@@ -148,7 +148,7 @@ export const ppOcrAdapter: ModelAdapter = {
     modelPath: DET_PATH,
     tags: ['vision', 'ocr', 'text'],
   },
-  graphs: [{ name: 'rec', modelPath: REC_PATH }],
+  graphs: [{ name: 'rec', modelPath: REC_PATH, requiredBackend: 'wasm' }],
   inputSpecs: [
     { name: 'image', dtype: 'float32', shape: [1, 3, DET_SIZE, DET_SIZE], description: 'Image containing text' },
   ],

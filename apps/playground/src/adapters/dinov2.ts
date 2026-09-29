@@ -28,6 +28,7 @@ export const dinov2Adapter: ModelAdapter = {
     modelPath: 'https://huggingface.co/litert-community/DINOv2-ViT-S14-LiteRT/resolve/main/dinov2_s_fp16.tflite',
     tags: ['vision', 'embeddings'],
   },
+  requiredBackend: 'wasm', // LiteRT.js 2.5.3 WebGPU sweep runs but does not match WASM output.
   inputSpecs: INPUT_SPECS,
   outputSpecs: OUTPUT_SPECS,
 

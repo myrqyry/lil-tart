@@ -164,8 +164,8 @@ export const matchaTtsAdapter: ModelAdapter = {
     tags: ['audio', 'tts', 'matcha'],
   },
   graphs: [
-    { name: 'decoder', modelPath: `${MATCHA_BASE}/matcha_decoder_fp16.tflite` },
-    { name: 'vocoder', modelPath: `${MATCHA_BASE}/matcha_vocoder_fp16.tflite` },
+    { name: 'decoder', modelPath: `${MATCHA_BASE}/matcha_decoder_fp16.tflite`, requiredBackend: 'wasm' },
+    { name: 'vocoder', modelPath: `${MATCHA_BASE}/matcha_vocoder_fp16.tflite`, requiredBackend: 'wasm' },
   ],
   inputSpecs: [
     { name: 'text', dtype: 'string', shape: [], description: 'Text to speak (English)', constraints: { text: true } },
