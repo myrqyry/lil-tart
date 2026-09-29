@@ -130,6 +130,35 @@ describe('createRuntimePathProof', () => {
     })
   })
 
+  it('does not borrow a subgraph backend for missing main-graph proof', () => {
+    const proof = createRuntimePathProof({
+      adapter,
+      selectedBackend: 'webgpu',
+      modelInfo: null,
+      telemetry: [
+        event({
+          modelPath: 'models/encoder.tflite',
+          requestedBackend: 'wasm',
+          resolvedBackend: 'wasm',
+          inferenceDurationMs: 10,
+        }),
+      ],
+      telemetryStart: 0,
+      outputCount: 1,
+      capturedAt: '2026-09-17T20:01:00.000Z',
+    })
+
+    expect(proof).toMatchObject({
+      mainGraphRequestedBackend: 'unknown',
+      mainGraphResolvedBackend: 'unknown',
+    })
+    expect(proof?.graphBackends[0]).toMatchObject({
+      graph: 'encoder',
+      requestedBackend: 'wasm',
+      resolvedBackend: 'wasm',
+    })
+  })
+
   it('preserves each graph path and aggregates one fallback count per graph', () => {
     const proof = createRuntimePathProof({
       adapter,
