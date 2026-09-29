@@ -1,10 +1,15 @@
-import { useState } from 'react'
+import {
+  CheckCircleRegular,
+  CloseCircleRegular,
+  InformationRegular,
+  Loading3Regular,
+  WarningRegular,
+} from '@mingcute/react/core-regular'
 import type { TartGuideMessage, TartGuideTone } from '../tartGuide'
 
 interface TartGuideProps {
   guide: TartGuideMessage
   onRunPreflight?: () => void
-  embedded?: boolean
 }
 
 const toneClasses: Record<TartGuideTone, string> = {
@@ -15,122 +20,32 @@ const toneClasses: Record<TartGuideTone, string> = {
   error: 'border-error/60 bg-error-container/20',
 }
 
-function TartMascot({ tone, compact = false }: { tone: TartGuideTone; compact?: boolean }) {
-  const isError = tone === 'error'
-  const isHappy = tone === 'success'
-  const isWorking = tone === 'working'
-  const isWarning = tone === 'warning'
-
-  return (
-    <svg
-      viewBox="0 0 120 120"
-      role="img"
-      aria-label="Lil Tart mascot"
-      className={`tart-mascot ${compact ? 'h-14 w-14' : 'h-20 w-20 shrink-0'}`}
-    >
-      <ellipse cx="60" cy="103" rx="34" ry="7" fill="currentColor" opacity="0.12" />
-
-      {isWorking && (
-        <g fill="none" stroke="currentColor" strokeLinecap="round" opacity="0.45">
-          <path d="M45 22c-7-8 6-10 0-18" />
-          <path d="M60 18c-7-8 6-10 0-18" />
-          <path d="M75 22c-7-8 6-10 0-18" />
-        </g>
-      )}
-
-      <path
-        d="M31 43c2-13 13-23 29-23s27 10 29 23l6 43c1 9-6 17-15 17H40c-9 0-16-8-15-17z"
-        fill="#D99A45"
-        stroke="#6B4423"
-        strokeWidth="4"
-        strokeLinejoin="round"
-      />
-      <ellipse cx="60" cy="50" rx="29" ry="24" fill="#F2C66D" stroke="#6B4423" strokeWidth="4" />
-      <ellipse cx="60" cy="50" rx="22" ry="17" fill={isError ? '#C94A4A' : isWarning ? '#D97706' : '#B83F5B'} />
-      <ellipse cx="54" cy="44" rx="8" ry="5" fill="#FFFFFF" opacity="0.2" transform="rotate(-18 54 44)" />
-
-      <g stroke="#3A2416" strokeWidth="3.5" strokeLinecap="round" fill="none">
-        {isError ? (
-          <>
-            <path d="M49 47l6 6m0-6-6 6" />
-            <path d="M65 47l6 6m0-6-6 6" />
-          </>
-        ) : isHappy ? (
-          <>
-            <path d="M48 51c3-5 7-5 10 0" />
-            <path d="M62 51c3-5 7-5 10 0" />
-          </>
-        ) : (
-          <>
-            <path d="M53 48v3" />
-            <path d="M67 48v3" />
-          </>
-        )}
-
-        {isWarning ? (
-          <path d="M54 61c4-3 8 3 12 0" />
-        ) : isError ? (
-          <path d="M53 64c5-5 9-5 14 0" />
-        ) : (
-          <path d="M53 59c4 5 10 5 14 0" />
-        )}
-
-        <path d="M29 67c-9 0-12 6-15 12" />
-        <path d="M91 67c9 0 12 6 15 12" />
-      </g>
-
-      <circle cx="14" cy="80" r="4" fill="#F2C66D" stroke="#6B4423" strokeWidth="2" />
-      <circle cx="106" cy="80" r="4" fill="#F2C66D" stroke="#6B4423" strokeWidth="2" />
-    </svg>
-  )
+function ToneIcon({ tone }: { tone: TartGuideTone }) {
+  const className = 'h-5 w-5'
+  if (tone === 'working') return <Loading3Regular className={className + ' animate-spin'} />
+  if (tone === 'success') return <CheckCircleRegular className={className} />
+  if (tone === 'warning') return <WarningRegular className={className} />
+  if (tone === 'error') return <CloseCircleRegular className={className} />
+  return <InformationRegular className={className} />
 }
 
-export default function TartGuide({ guide, onRunPreflight, embedded = false }: TartGuideProps) {
-  const [collapsed, setCollapsed] = useState(false)
-
-  if (!embedded && collapsed) {
-    return (
-      <button
-        type="button"
-        onClick={() => setCollapsed(false)}
-        className="neo-fab fixed bottom-4 right-4 z-50 p-1.5 text-on-surface"
-        aria-label="Open Lil Tart guide"
-        title="Open Lil Tart guide"
-      >
-        <TartMascot tone={guide.tone} compact />
-      </button>
-    )
-  }
-
+export default function TartGuide({ guide, onRunPreflight }: TartGuideProps) {
   return (
     <aside
-      className={`${embedded
-        ? 'tart-guide tart-guide--embedded w-full p-3.5 text-on-surface'
-        : 'tart-guide fixed bottom-4 right-4 z-50 w-[min(24rem,calc(100vw-2rem))] p-3 text-on-surface backdrop-blur-md'} ${toneClasses[guide.tone]}`}
-      aria-label="Lil Tart guide"
+      className={`runtime-guide w-full p-3.5 text-on-surface ${toneClasses[guide.tone]}`}
+      aria-label="Runtime status"
     >
-      <div className="flex items-start gap-2.5">
-        <TartMascot tone={guide.tone} />
+      <div className="flex items-start gap-3">
+        <div className="runtime-guide__icon mt-0.5 shrink-0" aria-hidden="true">
+          <ToneIcon tone={guide.tone} />
+        </div>
 
         <div className="min-w-0 flex-1" aria-live="polite">
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="text-xs font-medium text-on-surface-variant">
-                {guide.kicker}
-              </p>
-              <h2 className="mt-0.5 text-[15px] font-semibold text-on-surface">{guide.title}</h2>
-            </div>
-            {!embedded && (
-              <button
-                type="button"
-                onClick={() => setCollapsed(true)}
-                className="rounded-full px-2 py-1 text-xs text-on-surface-variant transition-colors hover:bg-surface-container-high hover:text-on-surface"
-                aria-label="Minimize Lil Tart guide"
-                title="Minimize"
-              >
-                −
-              </button>
-            )}
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-on-surface-muted">
+              {guide.kicker}
+            </p>
+            <h2 className="text-[15px] font-semibold text-on-surface">{guide.title}</h2>
           </div>
 
           <p className="mt-1 text-[13px] leading-snug text-on-surface-variant">{guide.message}</p>
