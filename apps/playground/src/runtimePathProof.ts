@@ -101,15 +101,13 @@ export function createRuntimePathProof(options: CreateRuntimePathProofOptions): 
   const mainEvent = [...inferenceEvents]
     .reverse()
     .find((entry) => entry.modelPath === options.adapter.metadata.modelPath)
-  const receiptEvent = mainEvent ?? inferenceEvents[inferenceEvents.length - 1]!
-
   return {
     modelId: options.adapter.modelId,
     modelName: options.adapter.metadata.name,
     modelPath: options.adapter.metadata.modelPath,
     selectedBackend: options.selectedBackend,
-    mainGraphRequestedBackend: options.modelInfo?.requestedBackend ?? receiptEvent.requestedBackend,
-    mainGraphResolvedBackend: options.modelInfo?.resolvedBackend ?? receiptEvent.resolvedBackend,
+    mainGraphRequestedBackend: options.modelInfo?.requestedBackend ?? mainEvent?.requestedBackend ?? 'unknown',
+    mainGraphResolvedBackend: options.modelInfo?.resolvedBackend ?? mainEvent?.resolvedBackend ?? 'unknown',
     compileDurationMs: options.modelInfo?.compileDurationMs ?? 0,
     fallbackCount,
     outputCount: options.outputCount,
