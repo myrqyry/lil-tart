@@ -233,7 +233,6 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
       >
         <aside className="lg:sticky lg:top-2 lg:flex lg:h-[calc(100vh-1rem)] lg:min-h-0 lg:flex-col">
           <TartGuide
-            embedded
             guide={tartGuide}
             onRunPreflight={selectedLoaded ? () => void preflightModel() : undefined}
           />
@@ -330,7 +329,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                           <div>
                             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-on-surface-muted">Inference workspace</p>
                             <p className="mt-0.5 text-[11px] text-on-surface-variant">
-                              Real inputs and outputs live here under Lil Tart.
+                              Real inputs and outputs live here in the inference panel.
                             </p>
                           </div>
                           <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
