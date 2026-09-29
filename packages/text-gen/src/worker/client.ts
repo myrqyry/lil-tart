@@ -1,5 +1,7 @@
 import type {
   LiteRtLmWorkerGenerationConfig,
+  LiteRtLmWorkerLoadOptions,
+  LiteRtLmWorkerPrompt,
   LiteRtLmWorkerRequest,
   LiteRtLmWorkerResponse,
 } from './protocol';
@@ -29,6 +31,10 @@ function createAbortError(): DOMException {
 }
 
 export class LiteRtLmWorkerClient {
+  static readonly capabilities = {
+    mediaPipeMultimodal: true,
+  } as const;
+
   private worker: WorkerLike;
   private loadPromise: Promise<void> | null = null;
   private loadResolve: (() => void) | null = null;
@@ -42,12 +48,12 @@ export class LiteRtLmWorkerClient {
     this.worker.onerror = (event) => this.handleError(event);
   }
 
-  async load(model: string | Blob): Promise<void> {
+  async load(model: string | Blob, options?: LiteRtLmWorkerLoadOptions): Promise<void> {
     if (this.loadPromise) return this.loadPromise;
     this.loadPromise = new Promise<void>((resolve, reject) => {
       this.loadResolve = resolve;
       this.loadReject = reject;
-      this.worker.postMessage({ type: 'load', model });
+      this.worker.postMessage({ type: 'load', model, ...(options ? { options } : {}) });
     });
     try {
       await this.loadPromise;
@@ -59,7 +65,7 @@ export class LiteRtLmWorkerClient {
   }
 
   generate(
-    prompt: string,
+    prompt: LiteRtLmWorkerPrompt,
     onToken: (text: string) => void,
     signal?: AbortSignal,
     options: LiteRtLmGenerationOptions = {},

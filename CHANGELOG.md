@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `text-gen`'s shared worker client now has an explicit MediaPipe GenAI engine for browser multimodal prompts. Existing LiteRT-LM callers stay text-only and unchanged; multimodal consumers can send structured text/image/audio parts, while remote model URLs are handed directly to MediaPipe and Blob models are streamed through a reader instead of being materialized into another full ArrayBuffer.
 - `@litert-playground/text-gen` now forwards LiteRT-LM tool definitions and streamed tool calls through its public pipeline callbacks.
 - `@litert-playground/text-gen` now accepts caller-owned LiteRT-LM model inputs (URL, Blob, or stream), exposes `loadForBackend()`, and carries tool declarations plus streamed tool calls so downstream apps can reuse their persistent model cache and tool-capable conversations without fabricating unrelated runtime services.
 - Shared downstream inference compatibility now covers browser cache, text generation, encoder embeddings, ColBERT retrieval, Kokoro, Qwen3-TTS, image embeddings, and video classification from their packed public entrypoints.

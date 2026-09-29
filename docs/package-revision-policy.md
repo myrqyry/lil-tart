@@ -76,6 +76,9 @@ inference-core
 └─ qwen3-tts
 ```
 
-Product applications still own their own worker orchestration, UI state,
-conversation semantics, audio playback policy, and app-specific persistence.
-Those concerns should not leak back into Lil Tart's shared packages.
+Shared packages own reusable worker transport and runtime mechanics when those
+mechanics are part of the supported inference surface. Product applications
+still own when and why inference runs, model/persona selection, UI state,
+conversation and product semantics, audio playback policy, and app-specific
+persistence. Those product concerns should not leak back into Lil Tart's
+shared packages.
