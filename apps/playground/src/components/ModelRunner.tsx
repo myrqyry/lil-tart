@@ -448,7 +448,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                             ))}
                           </div>
                           <p className="mt-2 border-t border-outline-variant/50 pt-2 text-[10px] text-on-surface-muted">
-                            {runtimePathProof.outputCount} parsed {runtimePathProof.outputCount === 1 ? 'output' : 'outputs'} · {runtimePathProof.fallbackCount} {runtimePathProof.fallbackCount === 1 ? 'fallback' : 'fallbacks'} · durable evidence: {runtimePathProof.durableVerification?.status ?? 'registered'}
+                            {runtimePathProof.outputCount} parsed {runtimePathProof.outputCount === 1 ? 'output' : 'outputs'} · {runtimePathProof.fallbackCount} {runtimePathProof.fallbackCount === 1 ? 'fallback' : 'fallbacks'} · durable evidence: {runtimePathProof.durableVerification?.status ?? 'none recorded'}
                           </p>
                         </div>
                       )}
