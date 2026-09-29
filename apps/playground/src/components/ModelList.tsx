@@ -6,11 +6,17 @@ import {
   Eye2Regular,
   Grid2Regular,
   Loading3Regular,
+  AudioTapeRegular,
+  HeadphoneRegular,
   Message1Regular,
+  MicRegular,
   Music2Regular,
   PlayRegular,
   PowerRegular,
   RouteRegular,
+  SoundLineRegular,
+  SpeakerRegular,
+  SubtitleRegular,
 } from '@mingcute/react/core-regular'
 import type { ModelAdapter } from '../adapters/types'
 
@@ -130,6 +136,33 @@ function producesImage(adapter: ModelAdapter): boolean {
   )
 }
 
+function AudioGlyph({ adapter, className = '' }: { adapter?: ModelAdapter; className?: string }) {
+  if (!adapter) return <HeadphoneRegular className={className} />
+
+  const tags = new Set(adapter.metadata.tags.map((tag) => tag.toLowerCase()))
+  const searchable = `${adapter.metadata.name} ${adapter.metadata.description}`.toLowerCase()
+
+  if (tags.has('music') || /music transcription|music generation|musiccoca/.test(searchable)) {
+    return <Music2Regular className={className} />
+  }
+  if (tags.has('tts') || /text[- ]?to[- ]?speech|speech synthesis|synthesized audio/.test(searchable)) {
+    return <SpeakerRegular className={className} />
+  }
+  if (tags.has('codec') || /codec|mimi/.test(searchable)) {
+    return <AudioTapeRegular className={className} />
+  }
+  if (tags.has('asr') || /speech recognition|speech[- ]?to[- ]?text|whisper|moonshine|parakeet|granite speech/.test(searchable)) {
+    return <SubtitleRegular className={className} />
+  }
+  if (tags.has('keyword-spotting') || /keyword spotting|voice activity/.test(searchable)) {
+    return <MicRegular className={className} />
+  }
+  if (tags.has('pitch') || tags.has('tuner') || tags.has('tagging') || /pitch|audioset|audio tagging|audio classification/.test(searchable)) {
+    return <SoundLineRegular className={className} />
+  }
+  return <HeadphoneRegular className={className} />
+}
+
 function FamilyGlyph({
   adapter,
   family,
@@ -141,7 +174,7 @@ function FamilyGlyph({
 }) {
   if (family === 'Pipelines') return <RouteRegular className={className} />
   if (family === 'Language') return <Message1Regular className={className} />
-  if (family === 'Speech & audio') return <Music2Regular className={className} />
+  if (family === 'Speech & audio') return <AudioGlyph adapter={adapter} className={className} />
   if (family === 'Vision & image') {
     return adapter && producesImage(adapter)
       ? <Camera2Regular className={className} />
