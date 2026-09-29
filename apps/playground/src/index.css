@@ -318,7 +318,8 @@ h1 {
 }
 
 .filter-chip {
-  border: 1px solid transparent;
+  border-width: 1px;
+  border-style: solid;
   border-radius: 999px;
   box-shadow:
     3px 4px 8px oklch(0.025 0.01 330 / 0.34),
@@ -339,7 +340,8 @@ h1 {
 }
 
 .tart-guide {
-  border: 1px solid transparent;
+  border-width: 1px;
+  border-style: solid;
   border-radius: 2rem 2.45rem 2rem 2.6rem;
   box-shadow:
     7px 9px 18px oklch(0.025 0.01 330 / 0.36),
