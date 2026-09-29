@@ -1,8 +1,15 @@
-import type { Message, SamplerParameters, SessionConfig } from '@litert-lm/core';
-import type { ConversationConfig } from '@litert-lm/core';
 import type {
+  ConversationConfig,
+  Message,
+  SamplerParameters,
+  SessionConfig,
+} from '@litert-lm/core';
+import { MediaPipeMultimodalEngine } from './mediapipe-engine';
+import type {
+  LiteRtLmWorkerEngine,
   LiteRtLmWorkerGenerationConfig,
   LiteRtLmWorkerMessage,
+  LiteRtLmWorkerPrompt,
   LiteRtLmWorkerRequest,
   LiteRtLmWorkerResponse,
 } from './protocol';
@@ -37,8 +44,13 @@ type Conversation = Awaited<ReturnType<LiteRtLmEngine['createConversation']>>;
 
 const worker = self as unknown as WorkerScope;
 
-let engine: LiteRtLmEngine | undefined;
+let liteRtLmEngine: LiteRtLmEngine | undefined;
+let mediaPipeEngine: MediaPipeMultimodalEngine | undefined;
+let activeEngine: LiteRtLmWorkerEngine = 'litert-lm';
+let mediaPipeQueue: Promise<void> = Promise.resolve();
 const activeConversations = new Map<string, Conversation>();
+const mediaPipeGenerationIds = new Set<string>();
+const cancelledGenerations = new Set<string>();
 
 function extractText(message: Message): string {
   if (typeof message.content === 'string') return message.content;
@@ -87,8 +99,6 @@ function buildConversationConfig(config?: LiteRtLmWorkerGenerationConfig): Conve
 
 async function replayHistory(conversation: Conversation, history?: LiteRtLmWorkerMessage[]): Promise<void> {
   if (!history?.length) return;
-  // LiteRT-LM populates the conversation KV cache on each send, so history
-  // must be replayed in order rather than in parallel.
   for (const message of history) {
     await conversation.sendMessage({
       role: message.role === 'assistant' ? 'model' : message.role,
@@ -97,7 +107,10 @@ async function replayHistory(conversation: Conversation, history?: LiteRtLmWorke
   }
 }
 
-async function streamResponse(stream: ReadableStream<Message>, onMessage: (message: Message) => void): Promise<void> {
+async function streamResponse(
+  stream: ReadableStream<Message>,
+  onMessage: (message: Message) => void,
+): Promise<void> {
   if (Symbol.asyncIterator in stream) {
     for await (const chunk of stream) onMessage(chunk);
   } else {
@@ -120,30 +133,119 @@ async function disposeConversation(id: string, conversation: Conversation): Prom
   await conversation.delete();
 }
 
-async function generate(id: string, prompt: string, config?: LiteRtLmWorkerGenerationConfig): Promise<void> {
-  if (!engine) throw new Error('LiteRT-LM is not loaded');
-  const conversation = await engine.createConversation(buildConversationConfig(config));
+function toLiteRtLmText(prompt: LiteRtLmWorkerPrompt): string {
+  if (typeof prompt === 'string') return prompt;
+  if (prompt.some((part) => part.type !== 'text')) {
+    throw new Error(
+      'LiteRT-LM JavaScript currently supports text-only prompts; load the worker with engine="mediapipe" for image/audio input',
+    );
+  }
+  return prompt
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('');
+}
+
+async function generateLiteRtLm(
+  id: string,
+  prompt: LiteRtLmWorkerPrompt,
+  config?: LiteRtLmWorkerGenerationConfig,
+): Promise<void> {
+  if (!liteRtLmEngine) throw new Error('LiteRT-LM is not loaded');
+  const conversation = await liteRtLmEngine.createConversation(buildConversationConfig(config));
   activeConversations.set(id, conversation);
   try {
     await replayHistory(conversation, config?.history);
-    await streamResponse(conversation.sendMessageStreaming({ role: 'user', content: prompt }), (message) => {
-      const reasoning = extractReasoning(message);
-      if (reasoning) emit({ type: 'reasoning', id, text: reasoning });
-      const text = extractText(message);
-      if (text) emit({ type: 'token', id, text });
-    });
+    await streamResponse(
+      conversation.sendMessageStreaming({ role: 'user', content: toLiteRtLmText(prompt) }),
+      (message) => {
+        const reasoning = extractReasoning(message);
+        if (reasoning) emit({ type: 'reasoning', id, text: reasoning });
+        const text = extractText(message);
+        if (text) emit({ type: 'token', id, text });
+      },
+    );
     emit({ type: 'complete', id });
   } finally {
     await disposeConversation(id, conversation);
   }
 }
 
+async function generateMediaPipe(id: string, prompt: LiteRtLmWorkerPrompt): Promise<void> {
+  if (!mediaPipeEngine) throw new Error('MediaPipe LLM Inference is not loaded');
+  if (cancelledGenerations.has(id)) {
+    cancelledGenerations.delete(id);
+    return;
+  }
+
+  mediaPipeGenerationIds.add(id);
+  try {
+    await mediaPipeEngine.generate(prompt, (text) => {
+      if (!cancelledGenerations.has(id) && text) {
+        emit({ type: 'token', id, text });
+      }
+    });
+    if (!cancelledGenerations.has(id)) {
+      emit({ type: 'complete', id });
+    }
+  } finally {
+    mediaPipeGenerationIds.delete(id);
+    cancelledGenerations.delete(id);
+  }
+}
+
+async function enqueueMediaPipeGeneration(
+  id: string,
+  prompt: LiteRtLmWorkerPrompt,
+): Promise<void> {
+  const task = mediaPipeQueue
+    .catch(() => undefined)
+    .then(() => generateMediaPipe(id, prompt));
+  mediaPipeQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
+  await task;
+}
+
 async function disposeAllConversations(): Promise<void> {
   for (const [id, conversation] of activeConversations) {
     conversation.cancel();
     await conversation.delete();
+    activeConversations.delete(id);
   }
-  activeConversations.clear();
+}
+
+async function disposeLoadedEngine(): Promise<void> {
+  await disposeAllConversations();
+
+  if (liteRtLmEngine) {
+    await liteRtLmEngine.delete();
+    liteRtLmEngine = undefined;
+  }
+
+  if (mediaPipeEngine) {
+    for (const id of mediaPipeGenerationIds) cancelledGenerations.add(id);
+    await mediaPipeQueue.catch(() => undefined);
+    mediaPipeEngine.dispose();
+    mediaPipeEngine = undefined;
+  }
+}
+
+async function loadEngine(data: Extract<LiteRtLmWorkerRequest, { type: 'load' }>): Promise<void> {
+  await disposeLoadedEngine();
+
+  activeEngine = data.options?.engine ?? 'litert-lm';
+  if (activeEngine === 'mediapipe') {
+    mediaPipeEngine = new MediaPipeMultimodalEngine();
+    await mediaPipeEngine.load(data.model, data.options?.mediaPipe);
+    return;
+  }
+
+  const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
+  liteRtLmEngine = await module.Engine.create({
+    model: data.model,
+    mainExecutorSettings: { maxNumTokens: 8192 },
+  });
 }
 
 worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
@@ -151,25 +253,26 @@ worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
   try {
     switch (data.type) {
       case 'load':
-        await disposeAllConversations();
-        await engine?.delete();
-        const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
-        engine = await module.Engine.create({
-          model: data.model,
-          mainExecutorSettings: { maxNumTokens: 8192 },
-        });
+        await loadEngine(data);
         emit({ type: 'ready' });
         break;
       case 'generate':
-        await generate(data.id, data.prompt, data.config);
+        if (activeEngine === 'mediapipe') {
+          await enqueueMediaPipeGeneration(data.id, data.prompt);
+        } else {
+          await generateLiteRtLm(data.id, data.prompt, data.config);
+        }
         break;
       case 'cancel':
-        activeConversations.get(data.id)?.cancel();
+        if (activeEngine === 'mediapipe') {
+          cancelledGenerations.add(data.id);
+        } else {
+          activeConversations.get(data.id)?.cancel();
+        }
         break;
       case 'dispose':
-        await disposeAllConversations();
-        await engine?.delete();
-        engine = undefined;
+        for (const id of mediaPipeGenerationIds) cancelledGenerations.add(id);
+        await disposeLoadedEngine();
         emit({ type: 'disposed' });
         break;
     }

@@ -14,9 +14,39 @@ export interface LiteRtLmWorkerGenerationConfig {
   systemPrompt?: string;
 }
 
+export type LiteRtLmWorkerEngine = 'litert-lm' | 'mediapipe';
+
+export interface LiteRtLmWorkerMediaPipeLoadOptions {
+  wasmBaseUrl?: string;
+  maxTokens?: number;
+  topK?: number;
+  temperature?: number;
+  randomSeed?: number;
+  maxNumImages?: number;
+  supportAudio?: boolean;
+  disableRewinding?: boolean;
+}
+
+export interface LiteRtLmWorkerLoadOptions {
+  engine?: LiteRtLmWorkerEngine;
+  mediaPipe?: LiteRtLmWorkerMediaPipeLoadOptions;
+}
+
+export type LiteRtLmWorkerPromptPart =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: Blob }
+  | { type: 'audio'; data: Blob };
+
+export type LiteRtLmWorkerPrompt = string | LiteRtLmWorkerPromptPart[];
+
 export type LiteRtLmWorkerRequest =
-  | { type: 'load'; model: string | Blob }
-  | { type: 'generate'; id: string; prompt: string; config?: LiteRtLmWorkerGenerationConfig }
+  | { type: 'load'; model: string | Blob; options?: LiteRtLmWorkerLoadOptions }
+  | {
+      type: 'generate';
+      id: string;
+      prompt: LiteRtLmWorkerPrompt;
+      config?: LiteRtLmWorkerGenerationConfig;
+    }
   | { type: 'cancel'; id: string }
   | { type: 'dispose' };
 

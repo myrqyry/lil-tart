@@ -1,13 +1,15 @@
 <!-- meristem-template:v1 -->
 # Active Work
 
-Subject: aster/litert-upstream-hardening — source pinning, artifact integrity, and official LiteRT contract hardening.
+Subject: aster/litert-upstream-hardening — source pinning, artifact integrity, official LiteRT contract hardening, and shared multimodal worker transport.
 
 ## Current outcome
 
 Lil Tart now consumes upstream LiteRT model artifacts with immutable provenance,
-enforces available integrity facts on real Qwen3-TTS execution paths, and locks
-the host-side Qwen orchestration to the current official reference contract.
+enforces available integrity facts on real Qwen3-TTS execution paths, locks the
+host-side Qwen orchestration to the current official reference contract, and
+exposes a shared browser worker transport with explicit text-only LiteRT-LM and
+multimodal MediaPipe GenAI engines.
 
 ## Current evidence
 
@@ -17,12 +19,55 @@ the host-side Qwen orchestration to the current official reference contract.
 - Full repository pnpm verify passed, including typecheck, tests, boundaries, packed-consumer compatibility, runtime qualification, and build.
 - Durable record: docs/verification/2026-09-28-litert-upstream-integrity.md.
 
+### Current continuation (uncommitted)
+
+The public `text-gen` worker transport now has an additive, explicit MediaPipe
+GenAI engine for multimodal browser consumers. Existing `load(model)` and
+string `generate(prompt)` callers keep the LiteRT-LM path unchanged; a consumer
+can opt into `engine: 'mediapipe'` and send structured text/image/audio prompt
+parts. The worker owns the MediaPipe runtime and temporary media object URLs.
+
+This is intentionally a two-engine design. The installed `@litert-lm/core`
+JavaScript contract still marks image/audio/video content as unsupported
+placeholders, so Lil Tart does not pretend that adding an image-shaped object to
+LiteRT-LM makes vision work. MediaPipe Tasks GenAI 0.10.29 is the browser engine
+used for the modality it actually supports.
+
+The MediaPipe path also removes a consumer-side memory trap: a remote model URL
+is passed directly to MediaPipe, while Blob models are supplied as stream
+readers. Consumers no longer need to download a multi-gigabyte checkpoint into
+JavaScript chunks, concatenate another full buffer, and manufacture an object
+URL before initialization.
+
+Evidence established so far against this working tree:
+
+- `pnpm --filter @litert-playground/text-gen typecheck` — pass.
+- `pnpm --filter @litert-playground/text-gen test` — 32/32 tests pass.
+- `pnpm test:compatibility` — all 10 packed public packages pass import,
+  peer-metadata, typecheck, and external Vite build; the external fixture names
+  and uses the new worker load/prompt types.
+- A Live Streamer consumer was temporarily linked to this working-tree package;
+  its production Vite build emitted the upgraded module worker plus a separate
+  MediaPipe GenAI chunk, and a Vite/Vitest feature probe selected the shared
+  multimodal path. The consumer link was then restored to its pinned Git SHA.
+
+Full `pnpm verify` passed after this continuation: workspace typecheck,
+all package/app tests, 15/15 package-boundary tests, all 10 packed-consumer
+compatibility rows, runtime qualification, and production builds.
+
 ## Deliberate boundary
 
 LiteRT-LM checkpoints remain streaming inputs to Engine.create. Do not force
 multi-gigabyte checkpoints through the full-buffer hash verifier merely to hash
 them; immutable revision pinning is the current runtime guarantee until
 incremental or file-backed verification preserves the streaming memory profile.
+
+LiteRT-LM's JavaScript worker remains text-only. Multimodal input is routed only
+through the explicit MediaPipe engine. MediaPipe's web API does not expose
+mid-generation cancellation; a worker-client abort rejects the caller and
+suppresses stale/queued output, but cannot stop GPU work that MediaPipe has
+already started. Do not document that as physical cancellation until upstream
+provides such a primitive.
 
 ## Base continuity
 

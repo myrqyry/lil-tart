@@ -17,6 +17,11 @@ export type {
   LiteRtLmWorkerResponse,
   LiteRtLmWorkerMessage,
   LiteRtLmWorkerGenerationConfig,
+  LiteRtLmWorkerEngine,
+  LiteRtLmWorkerLoadOptions,
+  LiteRtLmWorkerMediaPipeLoadOptions,
+  LiteRtLmWorkerPrompt,
+  LiteRtLmWorkerPromptPart,
 } from './worker/protocol'
 export type {
   TextGenerationInput,

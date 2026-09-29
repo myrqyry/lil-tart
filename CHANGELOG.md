@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `text-gen`'s shared worker client now has an explicit MediaPipe GenAI engine for browser multimodal prompts. Existing LiteRT-LM callers stay text-only and unchanged; multimodal consumers can send structured text/image/audio parts, while remote model URLs are handed directly to MediaPipe and Blob models are streamed through a reader instead of being materialized into another full ArrayBuffer.
 - Shared downstream inference compatibility now covers browser cache, text generation, encoder embeddings, ColBERT retrieval, Kokoro, Qwen3-TTS, image embeddings, and video classification from their packed public entrypoints.
 - `feat(playground)`: wire adapters to Hugging Face and flag missing models (`apps/playground/src/adapters/*`, `types.ts`, `ModelList.tsx`, `ModelRunner.tsx`)
 - `feat`: add model-server base URL input to `ModelRunner` (`apps/playground/src/hooks/useModelRunner.ts`, `ModelRunner.tsx`)
