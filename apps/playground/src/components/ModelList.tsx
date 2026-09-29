@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import {
   ArrowRightUpRegular,
   Camera2Regular,
+  Delete2Regular,
   Download2Regular,
   Eye2Regular,
   Grid2Regular,
@@ -195,7 +196,9 @@ export default function ModelList({
   onLoad,
   onUnload,
   onOpenPipeline,
+  onRemoveStored,
   disabled,
+  storageBusy,
   loadingModelId,
   downloadProgress,
   selectedModelId,
@@ -290,6 +293,7 @@ export default function ModelList({
           const isLoaded = loadedModelId === adapter.modelId
           const stored = storedModels.get(adapter.modelId)
           const isUnavailable = !!adapter.disabled
+          const verificationStatus = adapter.verification?.status?.replace(/-/g, ' ')
 
           const handleCornerAction = () => {
             if (isUnavailable || isLoading) return
@@ -364,7 +368,9 @@ export default function ModelList({
               <button
                 type="button"
                 onClick={() => onSelect(adapter)}
-                className="block w-full flex-1 px-2.5 pb-2.5 pt-11 text-left"
+                aria-label={`${adapter.metadata.name}. ${isUnavailable ? 'Unavailable for execution; ' : ''}${verificationStatus ? 'Verification: ' + verificationStatus + '. ' : ''}Select to inspect details.`}
+                title={`${isUnavailable ? 'Unavailable for execution · ' : ''}${verificationStatus ? 'Verification: ' + verificationStatus : 'Inspect model details'}`}
+                className={`block w-full flex-1 px-2.5 pt-11 text-left ${isLoading ? 'pb-10' : 'pb-2.5'}`}
               >
                 <p className="model-card__title break-words text-[15px] font-semibold leading-[1.2] text-on-surface">
                   {adapter.metadata.name}
@@ -372,17 +378,40 @@ export default function ModelList({
                 <p className="model-card__description mt-1 text-[13px] leading-[1.28] text-on-surface-variant">
                   {adapter.metadata.description}
                 </p>
-                <div className="mt-2 flex min-h-4 items-center gap-1.5 text-[11px]">
+                <div className="mt-2 flex min-h-4 items-center gap-1.5 pr-7 text-[11px]">
                   {status && (
                     <span className={isLoaded ? 'font-medium text-tertiary' : isUnavailable ? 'text-on-surface-muted' : 'text-on-surface-variant'}>
                       {status}
                     </span>
                   )}
+                  {verificationStatus && (
+                    <span className="truncate text-[10px] text-on-surface-muted">· {verificationStatus}</span>
+                  )}
                 </div>
               </button>
 
+              {stored && !isLoaded && !isLoading && (
+                <button
+                  type="button"
+                  onClick={() => onRemoveStored(adapter.modelId)}
+                  disabled={storageBusy || disabled}
+                  aria-label={`Remove downloaded files for ${adapter.metadata.name}`}
+                  title="Remove downloaded files"
+                  className="absolute bottom-2 right-2 z-2 inline-flex h-6 w-6 items-center justify-center rounded-full text-on-surface-muted transition-transform hover:scale-110 hover:bg-error-container/25 hover:text-error active:scale-90 disabled:opacity-40"
+                >
+                  <Delete2Regular className="h-3.5 w-3.5" />
+                </button>
+              )}
+
               {isLoading && downloadProgress && (
                 <div className="absolute inset-x-2.5 bottom-1.5">
+                  <div className="mb-1 flex items-center justify-between gap-2 text-[10px] text-on-surface-muted">
+                    <span>{progressPercent(downloadProgress)}%</span>
+                    <span>
+                      {formatBytes(downloadProgress.loadedBytes)}
+                      {downloadProgress.totalBytes ? ' / ' + formatBytes(downloadProgress.totalBytes) : ''}
+                    </span>
+                  </div>
                   <div className="h-1 overflow-hidden rounded-full bg-outline-variant">
                     <div
                       className="h-full rounded-full bg-primary transition-all duration-300"
