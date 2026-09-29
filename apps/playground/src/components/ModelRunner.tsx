@@ -203,6 +203,14 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
   const activeBackendOverrides = accelerator === 'auto'
     ? []
     : backendConstraints.filter((constraint) => constraint.backend !== accelerator)
+  const mainExecutionBackend = selectedLoaded
+    ? modelInfo?.requestedBackend ?? resolvedAccelerator
+    : accelerator === 'auto'
+      ? null
+      : accelerator
+  const mixedBackendConstraints = backendConstraints.filter((constraint) =>
+    mainExecutionBackend ? constraint.backend !== mainExecutionBackend : accelerator === 'auto'
+  )
   const runtimeFallbackCount = selectedLoaded
     ? runtimePathProof?.fallbackCount ?? modelInfo?.fallbackCount ?? 0
     : 0
@@ -333,7 +341,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                             </p>
                           </div>
                           <span className="rounded-full bg-surface-container-high px-2 py-0.5 text-[10px] font-medium text-on-surface-variant">
-                            {activeBackendOverrides.length > 0 ? 'mixed' : (resolvedAccelerator ?? accelerator).toUpperCase()}
+                            {mixedBackendConstraints.length > 0 ? 'mixed' : (resolvedAccelerator ?? accelerator).toUpperCase()}
                           </span>
                         </div>
 
@@ -359,7 +367,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                           >
                             {operation === 'inference'
                               ? 'Running inference…'
-                              : activeBackendOverrides.length > 0
+                              : mixedBackendConstraints.length > 0
                                 ? 'Run Inference · mixed backends'
                                 : 'Run Inference · ' + (resolvedAccelerator ?? accelerator).toUpperCase()}
                           </button>
@@ -439,6 +447,9 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                               </div>
                             ))}
                           </div>
+                          <p className="mt-2 border-t border-outline-variant/50 pt-2 text-[10px] text-on-surface-muted">
+                            {runtimePathProof.outputCount} parsed {runtimePathProof.outputCount === 1 ? 'output' : 'outputs'} · {runtimePathProof.fallbackCount} {runtimePathProof.fallbackCount === 1 ? 'fallback' : 'fallbacks'} · durable evidence: {runtimePathProof.durableVerification?.status ?? 'registered'}
+                          </p>
                         </div>
                       )}
 
@@ -449,6 +460,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                             {recentTelemetry.map((entry, index) => (
                               <div key={[entry.timestamp, entry.event, index].join('-')}>
                                 {entry.event} · {entry.requestedBackend} → {entry.resolvedBackend}
+                                {' · ' + metric(entry.inferenceDurationMs ?? entry.compileDurationMs)}
                                 {entry.fallbackCount > 0 ? ' · ' + entry.fallbackCount + ' fallback' : ''}
                               </div>
                             ))}
@@ -463,23 +475,6 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                     </div>
                   )}
 
-                  <details className="border-t border-outline-variant/60 pt-3">
-                    <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-[0.14em] text-on-surface-muted">
-                      Runtime settings
-                    </summary>
-                    <div className="mt-2">
-                      <label className="block text-[11px] font-medium text-on-surface-muted">Model server base URL</label>
-                      <input
-                        type="url"
-                        placeholder="https://your-model-server.com/"
-                        value={modelBaseInput}
-                        onChange={e => setModelBaseInput(e.target.value)}
-                        onBlur={commitModelBase}
-                        onKeyDown={e => { if (e.key === 'Enter') commitModelBase() }}
-                        className="neo-input mt-1 w-full px-3 py-2 text-xs text-on-surface focus:outline-none"
-                      />
-                    </div>
-                  </details>
                 </>
               ) : (
                 <div className="neo-empty-state p-5 text-center">
@@ -489,6 +484,24 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   </p>
                 </div>
               )}
+
+              <details className="border-t border-outline-variant/60 pt-3">
+                <summary className="cursor-pointer select-none text-xs font-semibold uppercase tracking-[0.14em] text-on-surface-muted">
+                  Runtime settings
+                </summary>
+                <div className="mt-2">
+                  <label className="block text-[11px] font-medium text-on-surface-muted">Model server base URL</label>
+                  <input
+                    type="url"
+                    placeholder="https://your-model-server.com/"
+                    value={modelBaseInput}
+                    onChange={e => setModelBaseInput(e.target.value)}
+                    onBlur={commitModelBase}
+                    onKeyDown={e => { if (e.key === 'Enter') commitModelBase() }}
+                    className="neo-input mt-1 w-full px-3 py-2 text-xs text-on-surface focus:outline-none"
+                  />
+                </div>
+              </details>
             </div>
           </section>
         </aside>
@@ -524,7 +537,11 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
           </div>
 
           {orphanedModels.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-1.5 text-[11px] text-on-surface-variant">
+            <div className="mb-2">
+              <p className="mb-1.5 text-[11px] text-on-surface-muted">
+                {orphanedModels.length} previous-base or unverified {orphanedModels.length === 1 ? 'download' : 'downloads'} · {formatBytes(orphanedBytes)}
+              </p>
+              <div className="flex flex-wrap gap-1.5 text-[11px] text-on-surface-variant">
               {orphanedModels.map((model) => (
                 <button
                   key={model.modelId}
@@ -537,6 +554,7 @@ export default function ModelRunner({ adapters, onSelect }: ModelRunnerProps) {
                   {model.unverified ? 'Unverified' : 'Remove'} {model.modelId}
                 </button>
               ))}
+              </div>
             </div>
           )}
 
