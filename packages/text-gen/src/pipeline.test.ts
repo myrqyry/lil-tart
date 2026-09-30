@@ -10,9 +10,10 @@ import {
   selectTextGenerationManifest,
 } from "./manifest";
 
-const { mockPipeline, mockEngineCreate, mockSendMessageStreaming } = vi.hoisted(() => ({
+const { mockPipeline, mockEngineCreate, mockCreateConversation, mockSendMessageStreaming } = vi.hoisted(() => ({
   mockPipeline: vi.fn(),
   mockEngineCreate: vi.fn(),
+  mockCreateConversation: vi.fn(),
   mockSendMessageStreaming: vi.fn(),
 }));
 
@@ -80,19 +81,22 @@ function streamOf(chunks: string[]): ReadableStream<{ text: string }> {  return 
 beforeEach(() => {
   mockPipeline.mockReset();
   mockEngineCreate.mockReset();
+  mockCreateConversation.mockReset();
   mockSendMessageStreaming.mockReset();
 
   mockPipeline.mockResolvedValue(async () => ({
     output: [{ generated_text: "Hello from transformers" }],
   }));
 
+  mockCreateConversation.mockResolvedValue({
+    sendMessage: async () => ({ text: "" }),
+    sendMessageStreaming: mockSendMessageStreaming,
+    cancel: () => {},
+    delete: async () => {},
+  });
+
   mockEngineCreate.mockResolvedValue({
-    createConversation: async () => ({
-      sendMessage: async () => ({ text: "" }),
-      sendMessageStreaming: mockSendMessageStreaming,
-      cancel: () => {},
-      delete: async () => {},
-    }),
+    createConversation: mockCreateConversation,
     delete: async () => {},
   });
 
@@ -185,6 +189,139 @@ describe("LiteRtLmTextPipeline", () => {
       })
     );
     expect(mockSendMessageStreaming).toHaveBeenCalled();
+  });
+
+  it("passes tools through the preface and forwards streamed tool calls", async () => {
+    const p = new LiteRtLmTextPipeline();
+    await p.load(fakeContext());
+    const onToolCall = vi.fn();
+    mockSendMessageStreaming.mockReturnValue(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            tool_calls: [
+              {
+                type: "function",
+                function: { name: "calculate", arguments: { expression: "2+2" } },
+              },
+            ],
+          });
+          controller.close();
+        },
+      }),
+    );
+
+    await p.run(
+      { systemPrompt: "Use tools when needed.", messages: [{ role: "user", content: "2+2?" }] },
+      {
+        tools: [
+          {
+            name: "calculate",
+            description: "Evaluate a mathematical expression",
+            parameters: {
+              type: "object",
+              properties: { expression: { type: "string" } },
+              required: ["expression"],
+            },
+          },
+        ],
+        onToolCall,
+      },
+    );
+
+    expect(mockCreateConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preface: expect.objectContaining({
+          messages: [{ role: "system", content: "Use tools when needed." }],
+          tools: [expect.objectContaining({ name: "calculate" })],
+        }),
+      }),
+    );
+    expect(onToolCall).toHaveBeenCalledWith([
+      { name: "calculate", arguments: { expression: "2+2" } },
+    ]);
+  });
+
+  it("forwards tools into the conversation preface and streams tool calls", async () => {
+    const onToolCall = vi.fn();
+    mockSendMessageStreaming.mockReturnValue(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            tool_calls: [
+              {
+                function: {
+                  name: "calculate",
+                  arguments: { expression: "2+2" },
+                },
+              },
+            ],
+          });
+          controller.close();
+        },
+      }),
+    );
+
+    const p = new LiteRtLmTextPipeline();
+    await p.load(fakeContext());
+    await p.run(
+      { systemPrompt: "Use tools when useful.", messages: [{ role: "user", content: "2+2?" }] },
+      {
+        tools: [
+          {
+            name: "calculate",
+            description: "Evaluate a mathematical expression",
+            parameters: {
+              type: "object",
+              properties: { expression: { type: "string" } },
+              required: ["expression"],
+            },
+          },
+        ],
+        onToolCall,
+      },
+    );
+
+    expect(mockCreateConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preface: expect.objectContaining({
+          messages: [{ role: "system", content: "Use tools when useful." }],
+          tools: [expect.objectContaining({ name: "calculate" })],
+        }),
+      }),
+    );
+    expect(onToolCall).toHaveBeenCalledWith([
+      { name: "calculate", arguments: { expression: "2+2" } },
+    ]);
+  });
+
+  it("releases each completed conversation before the next run", async () => {
+    const deletes: Array<ReturnType<typeof vi.fn>> = [];
+    const createConversation = vi.fn(async () => {
+      const deleteConversation = vi.fn(async () => undefined);
+      deletes.push(deleteConversation);
+      return {
+        sendMessage: async () => ({ text: "" }),
+        sendMessageStreaming: mockSendMessageStreaming,
+        cancel: vi.fn(),
+        delete: deleteConversation,
+      };
+    });
+    mockEngineCreate.mockResolvedValue({
+      createConversation,
+      delete: vi.fn(async () => undefined),
+    });
+
+    const p = new LiteRtLmTextPipeline();
+    await p.load(fakeContext());
+    await p.run({ messages: [{ role: "user", content: "first" }] });
+    await p.run({ messages: [{ role: "user", content: "second" }] });
+
+    expect(createConversation).toHaveBeenCalledTimes(2);
+    expect(deletes).toHaveLength(2);
+    expect(deletes[0]).toHaveBeenCalledTimes(1);
+    expect(deletes[1]).toHaveBeenCalledTimes(1);
+    expect(p).toHaveProperty("conversation", null);
   });
 
   it("loads the manifest's model path instead of a hardcoded default", async () => {
@@ -519,20 +656,45 @@ describe('LiteRtLmTextPipeline disposal boundaries', () => {
     expect(p.status).toBe('disposed')
   })
 
-  it.each(['conversation', 'engine'])('finishes disposal even when %s cleanup rejects', async (failure) => {
-    const cleanupError = new Error('delete failed')
+  it('reports completed-run conversation cleanup failures without retaining ownership', async () => {
+    const cleanupError = new Error('conversation delete failed')
     const conversation = {
       sendMessage: vi.fn(), sendMessageStreaming: mockSendMessageStreaming, cancel: vi.fn(),
-      delete: failure === 'conversation' ? vi.fn().mockRejectedValue(cleanupError) : vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockRejectedValue(cleanupError),
     }
     const engine = {
       createConversation: vi.fn().mockResolvedValue(conversation),
-      delete: failure === 'engine' ? vi.fn().mockRejectedValue(cleanupError) : vi.fn().mockResolvedValue(undefined),
+      delete: vi.fn().mockResolvedValue(undefined),
+    }
+    mockEngineCreate.mockResolvedValue(engine)
+    const p = new LiteRtLmTextPipeline()
+    await p.load(fakeContext())
+
+    await expect(p.run({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toBe(cleanupError)
+    expect(conversation.delete).toHaveBeenCalledTimes(1)
+    expect(p).toHaveProperty('conversation', null)
+    expect(p.status).toBe('ready')
+
+    await expect(p.dispose()).resolves.toBeUndefined()
+    expect(engine.delete).toHaveBeenCalledTimes(1)
+    expect(p.status).toBe('disposed')
+  })
+
+  it('finishes disposal even when engine cleanup rejects', async () => {
+    const cleanupError = new Error('engine delete failed')
+    const conversation = {
+      sendMessage: vi.fn(), sendMessageStreaming: mockSendMessageStreaming, cancel: vi.fn(),
+      delete: vi.fn().mockResolvedValue(undefined),
+    }
+    const engine = {
+      createConversation: vi.fn().mockResolvedValue(conversation),
+      delete: vi.fn().mockRejectedValue(cleanupError),
     }
     mockEngineCreate.mockResolvedValue(engine)
     const p = new LiteRtLmTextPipeline()
     await p.load(fakeContext())
     await p.run({ messages: [{ role: 'user', content: 'hi' }] })
+
     await expect(p.dispose()).rejects.toBe(cleanupError)
     expect(conversation.delete).toHaveBeenCalledTimes(1)
     expect(engine.delete).toHaveBeenCalledTimes(1)

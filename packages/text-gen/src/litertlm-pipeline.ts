@@ -12,6 +12,8 @@ import type {
   ConversationConfig,
   SamplerParameters,
   SessionConfig,
+  Tool,
+  ToolCall,
 } from '@litert-lm/core';
 import {
   type TextGenerationConfig,
@@ -59,6 +61,12 @@ interface StreamChunk {
   text?: string;
   content?: string | Array<{ type?: string; text?: string }>;
   channels?: Record<string, string>;
+  tool_calls?: ToolCall[];
+}
+
+export interface LiteRtLmToolCall {
+  name: string;
+  arguments: Record<string, unknown>;
 }
 
 export interface LiteRtLmTextConfig extends TextGenerationConfig {
@@ -67,8 +75,10 @@ export interface LiteRtLmTextConfig extends TextGenerationConfig {
   maxOutputTokens?: number;
   seed?: number;
   history?: TextMessage[];
+  tools?: Tool[];
   onToken?: (text: string) => void;
   onReasoning?: (text: string) => void;
+  onToolCall?: (calls: LiteRtLmToolCall[]) => void;
 }
 
 const DEFAULTS = {
@@ -119,6 +129,15 @@ function extractReasoning(message: StreamChunk): string {
   return message.channels?.reasoning ?? message.channels?.thought ?? message.channels?.think ?? '';
 }
 
+function extractToolCalls(message: StreamChunk): LiteRtLmToolCall[] {
+  return (message.tool_calls ?? [])
+    .map((call) => ({
+      name: call.function?.name ?? '',
+      arguments: (call.function?.arguments ?? {}) as Record<string, unknown>,
+    }))
+    .filter((call) => call.name.length > 0);
+}
+
 function buildConversationConfig(input: TextGenerationInput, config: LiteRtLmTextConfig): ConversationConfig | undefined {
   const conversationConfig: ConversationConfig = {};
   const hasSampler =
@@ -139,8 +158,12 @@ function buildConversationConfig(input: TextGenerationInput, config: LiteRtLmTex
     sessionConfig.maxOutputTokens = config.maxOutputTokens ?? config.maxTokens;
     conversationConfig.sessionConfig = sessionConfig;
   }
-  if (input.systemPrompt?.trim()) {
-    conversationConfig.preface = { messages: [{ role: 'system', content: input.systemPrompt }] };
+  if (input.systemPrompt?.trim() || config.tools?.length) {
+    conversationConfig.preface = {};
+    if (input.systemPrompt?.trim()) {
+      conversationConfig.preface.messages = [{ role: 'system', content: input.systemPrompt }];
+    }
+    if (config.tools?.length) conversationConfig.preface.tools = config.tools;
   }
   return Object.keys(conversationConfig).length > 0 ? conversationConfig : undefined;
 }
@@ -150,6 +173,7 @@ async function readStream(
   signal: AbortSignal | undefined,
   onToken: ((text: string) => void) | undefined,
   onReasoning: ((text: string) => void) | undefined,
+  onToolCall: ((calls: LiteRtLmToolCall[]) => void) | undefined,
 ): Promise<{ text: string; reasoning?: string }> {
   const reader = stream.getReader();
   let full = '';
@@ -170,6 +194,8 @@ async function readStream(
           reasoning += reason;
           onReasoning?.(reason);
         }
+        const toolCalls = extractToolCalls(value);
+        if (toolCalls.length > 0) onToolCall?.(toolCalls);
       }
     }
   } finally {
@@ -355,28 +381,44 @@ export class LiteRtLmTextPipeline
     if (!this.engine) throw new Error('LiteRT-LM pipeline not loaded');
     this.status = 'running';
     const cfg = { ...DEFAULTS, ...config };
+    let conversation: LiteRtLmConversation | null = null;
     try {
       if (signal?.aborted) throw new Error('CANCELLED');
       const messages = toLiteRtMessages(input, cfg.history);
-      this.conversation = await this.engine.createConversation(buildConversationConfig(input, cfg));
+      conversation = await this.engine.createConversation(buildConversationConfig(input, cfg));
+      this.conversation = conversation;
       const prompt = messages.pop()!;
       for (const msg of messages) {
         if (signal?.aborted) throw new Error('CANCELLED');
-        await this.conversation.sendMessage(msg);
+        await conversation.sendMessage(msg);
       }
       if (signal?.aborted) throw new Error('CANCELLED');
-      const stream = this.conversation.sendMessageStreaming(prompt);
-      const { text, reasoning } = await readStream(stream, signal, cfg.onToken, cfg.onReasoning);
-      this.status = this.disposed ? 'disposed' : 'ready';
+      const stream = conversation.sendMessageStreaming(prompt);
+      const { text, reasoning } = await readStream(
+        stream,
+        signal,
+        cfg.onToken,
+        cfg.onReasoning,
+        cfg.onToolCall,
+      );
       return {
         kind: 'text',
         text,
         ...(reasoning ? { reasoning } : {}),
       } satisfies TextInferenceResult;
     } catch (e) {
-      this.conversation?.cancel();
-      this.status = this.disposed ? 'disposed' : 'ready';
+      conversation?.cancel();
       throw e instanceof Error ? e : new Error(String(e));
+    } finally {
+      this.status = this.disposed ? 'disposed' : 'ready';
+      // dispose() takes ownership by clearing this.conversation before deleting it.
+      // Only the run that still owns the slot should release the conversation here;
+      // this avoids both native-resource leaks across runs and double-deletes when
+      // disposal races an in-flight generation.
+      if (conversation && this.conversation === conversation) {
+        this.conversation = null;
+        await conversation.delete();
+      }
     }
   }
 

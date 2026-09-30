@@ -8,7 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `@litert-playground/text-gen` now accepts caller-owned LiteRT-LM model inputs (URL, Blob, or stream) and exposes `loadForBackend()`, so downstream apps can reuse their own persistent model cache without fabricating unrelated runtime services.
+- `@litert-playground/text-gen` now forwards LiteRT-LM tool definitions and streamed tool calls through its public pipeline callbacks.
+- `@litert-playground/text-gen` now accepts caller-owned LiteRT-LM model inputs (URL, Blob, or stream), exposes `loadForBackend()`, and carries tool declarations plus streamed tool calls so downstream apps can reuse their persistent model cache and tool-capable conversations without fabricating unrelated runtime services.
 - Shared downstream inference compatibility now covers browser cache, text generation, encoder embeddings, ColBERT retrieval, Kokoro, Qwen3-TTS, image embeddings, and video classification from their packed public entrypoints.
 - `feat(playground)`: wire adapters to Hugging Face and flag missing models (`apps/playground/src/adapters/*`, `types.ts`, `ModelList.tsx`, `ModelRunner.tsx`)
 - `feat`: add model-server base URL input to `ModelRunner` (`apps/playground/src/hooks/useModelRunner.ts`, `ModelRunner.tsx`)
