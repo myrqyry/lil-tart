@@ -13,7 +13,6 @@ import type {
   SamplerParameters,
   SessionConfig,
   Tool,
-  ToolCall,
 } from '@litert-lm/core';
 import {
   type TextGenerationConfig,
@@ -61,7 +60,10 @@ interface StreamChunk {
   text?: string;
   content?: string | Array<{ type?: string; text?: string }>;
   channels?: Record<string, string>;
-  tool_calls?: ToolCall[];
+  // Treat tool payloads as untrusted at this package boundary. The current
+  // @litert-lm/core type is stricter than values observed across integrations,
+  // so normalization below owns validation instead of a cast.
+  tool_calls?: unknown[];
 }
 
 export interface LiteRtLmToolCall {
@@ -129,13 +131,47 @@ function extractReasoning(message: StreamChunk): string {
   return message.channels?.reasoning ?? message.channels?.thought ?? message.channels?.think ?? '';
 }
 
-function extractToolCalls(message: StreamChunk): LiteRtLmToolCall[] {
-  return (message.tool_calls ?? [])
-    .map((call) => ({
-      name: call.function?.name ?? '',
-      arguments: (call.function?.arguments ?? {}) as Record<string, unknown>,
-    }))
-    .filter((call) => call.name.length > 0);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function normalizeToolArguments(value: unknown): Record<string, unknown> {
+  if (value === undefined || value === null) return {};
+  if (isRecord(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (isRecord(parsed)) return parsed;
+    } catch (error) {
+      throw new InferenceError('OUTPUT_INVALID', 'LiteRT-LM returned invalid JSON tool arguments', {
+        cause: error,
+      });
+    }
+  }
+  throw new InferenceError('OUTPUT_INVALID', 'LiteRT-LM returned unsupported tool arguments');
+}
+
+function normalizeToolCall(call: unknown): LiteRtLmToolCall {
+  if (!isRecord(call) || !isRecord(call.function)) {
+    throw new InferenceError('OUTPUT_INVALID', 'LiteRT-LM returned a malformed tool call');
+  }
+  const name = typeof call.function.name === 'string' ? call.function.name.trim() : '';
+  if (!name) {
+    throw new InferenceError('OUTPUT_INVALID', 'LiteRT-LM returned a tool call without a function name');
+  }
+  return {
+    name,
+    arguments: normalizeToolArguments(call.function.arguments),
+  };
+}
+
+function attachCleanupFailure(primaryError: Error, cleanupError: unknown): void {
+  const errorWithCause = primaryError as Error & { cause?: unknown; cleanupError?: unknown };
+  const key = errorWithCause.cause === undefined ? 'cause' : 'cleanupError';
+  Object.defineProperty(errorWithCause, key, {
+    value: cleanupError,
+    configurable: true,
+  });
 }
 
 function buildConversationConfig(input: TextGenerationInput, config: LiteRtLmTextConfig): ConversationConfig | undefined {
@@ -178,6 +214,7 @@ async function readStream(
   const reader = stream.getReader();
   let full = '';
   let reasoning = '';
+  const streamedToolCalls: unknown[] = [];
   try {
     while (true) {
       if (signal?.aborted) throw new Error('CANCELLED');
@@ -194,9 +231,16 @@ async function readStream(
           reasoning += reason;
           onReasoning?.(reason);
         }
-        const toolCalls = extractToolCalls(value);
-        if (toolCalls.length > 0) onToolCall?.(toolCalls);
+        if (value.tool_calls?.length) streamedToolCalls.push(...value.tool_calls);
       }
+    }
+    // @litert-lm/core's conversation contract emits complete ToolCall objects,
+    // and AutoToolChat likewise concatenates chunk.tool_calls. Batch those complete
+    // calls until the stream closes so consumers never receive a half-finished turn.
+    // We intentionally do not invent OpenAI-style id/index delta merging that this
+    // runtime does not expose.
+    if (streamedToolCalls.length > 0) {
+      onToolCall?.(streamedToolCalls.map(normalizeToolCall));
     }
   } finally {
     reader.releaseLock();
@@ -232,13 +276,20 @@ function modelFetchError(path: string, error: unknown, signal: AbortSignal): Err
   })
 }
 
+export type LiteRtLmBackend = Exclude<Backend, 'webnn'>;
+export type LiteRtLmModelSource =
+  | string
+  | Blob
+  | (() => string | Blob | ReadableStream<Uint8Array>);
+
 export interface LiteRtLmTextPipelineOptions {
   // Base the manifest's repo-relative asset path is resolved against. Omit to
   // pass the path through unchanged.
   modelBase?: string;
-  // Downstream consumers may already own/persist model bytes. Supplying a model
-  // keeps that cache authoritative instead of forcing a second network fetch.
-  model?: string | Blob | ReadableStream<Uint8Array>;
+  // Downstream consumers may already own/persist model bytes. A stream is
+  // intentionally supplied through a factory because ReadableStream is one-shot
+  // and a cancelled/failed load must be able to request a fresh source on retry.
+  model?: LiteRtLmModelSource;
   maxContextTokens?: number;
 }
 
@@ -251,6 +302,7 @@ export class LiteRtLmTextPipeline
 
   private engine: LiteRtLmEngine | null = null;
   private conversation: LiteRtLmConversation | null = null;
+  private conversationCleanup: Promise<void> | null = null;
   private loadMs = 0;
   private loadAbort: AbortController | null = null;
   private loadToken = 0;
@@ -281,7 +333,7 @@ export class LiteRtLmTextPipeline
    * entrypoint lets downstream consumers use the text package without
    * fabricating unrelated LiteRT tensor/runtime services.
    */
-  async loadForBackend(backend: Backend, signal?: AbortSignal): Promise<void> {
+  async loadForBackend(backend: LiteRtLmBackend, signal?: AbortSignal): Promise<void> {
     return this.loadInternal(backend, signal);
   }
 
@@ -289,6 +341,12 @@ export class LiteRtLmTextPipeline
     if (this.status === 'ready') return;
     if (this.disposed) {
       throw new InferenceError('CANCELLED', 'Pipeline was disposed and cannot load again');
+    }
+    if (backend === 'webnn') {
+      throw new InferenceError(
+        'BACKEND_UNAVAILABLE',
+        'LiteRT-LM text generation does not support the WebNN backend',
+      );
     }
     this.status = 'loading';
     const loadStart = performance.now();
@@ -307,15 +365,19 @@ export class LiteRtLmTextPipeline
         this.manifest.assets.find((a) => a.id === 'model')?.path ??
         this.manifest.assets[0]?.path ??
         DEFAULTS.model;
+      const configuredModel = this.options.model;
       const model =
-        this.options.model ?? await this.resolveModelInput(modelPath, controller.signal);
+        configuredModel !== undefined
+          ? typeof configuredModel === 'function'
+            ? configuredModel()
+            : configuredModel
+          : await this.resolveModelInput(modelPath, controller.signal);
       if (cancelled()) {
         throw new InferenceError('CANCELLED', 'Model load was cancelled', { asset: modelPath });
       }
-      const resolvedBackend = backend === 'webnn' ? undefined : backend;
       const engine = await module.Engine.create({
         model,
-        backend: resolvedBackend,
+        backend,
         mainExecutorSettings: {
           maxNumTokens: this.options.maxContextTokens ?? DEFAULTS.maxContextTokens,
         },
@@ -382,6 +444,10 @@ export class LiteRtLmTextPipeline
     this.status = 'running';
     const cfg = { ...DEFAULTS, ...config };
     let conversation: LiteRtLmConversation | null = null;
+    let result: TextInferenceResult | undefined;
+    let primaryError: Error | undefined;
+    let cleanupError: unknown;
+
     try {
       if (signal?.aborted) throw new Error('CANCELLED');
       const messages = toLiteRtMessages(input, cfg.history);
@@ -401,44 +467,89 @@ export class LiteRtLmTextPipeline
         cfg.onReasoning,
         cfg.onToolCall,
       );
-      return {
+      result = {
         kind: 'text',
         text,
         ...(reasoning ? { reasoning } : {}),
       } satisfies TextInferenceResult;
-    } catch (e) {
+    } catch (error) {
       conversation?.cancel();
-      throw e instanceof Error ? e : new Error(String(e));
-    } finally {
-      this.status = this.disposed ? 'disposed' : 'ready';
-      // dispose() takes ownership by clearing this.conversation before deleting it.
-      // Only the run that still owns the slot should release the conversation here;
-      // this avoids both native-resource leaks across runs and double-deletes when
-      // disposal races an in-flight generation.
-      if (conversation && this.conversation === conversation) {
-        this.conversation = null;
-        await conversation.delete();
+      primaryError = error instanceof Error ? error : new Error(String(error));
+    }
+
+    // Keep the pipeline busy until native conversation cleanup has settled. This
+    // prevents a new run or dispose() from racing engine teardown ahead of the
+    // conversation that still owns native state.
+    if (conversation && this.conversation === conversation) {
+      const cleanup = conversation.delete();
+      this.conversationCleanup = cleanup;
+      try {
+        await cleanup;
+        if (this.conversation === conversation) this.conversation = null;
+      } catch (error) {
+        cleanupError = error;
+        // Keep the conversation reference so dispose() can retry cleanup.
+      } finally {
+        if (this.conversationCleanup === cleanup) this.conversationCleanup = null;
       }
     }
+
+    this.status = this.disposed ? 'disposed' : cleanupError ? 'error' : 'ready';
+
+    if (primaryError) {
+      if (cleanupError !== undefined) attachCleanupFailure(primaryError, cleanupError);
+      throw primaryError;
+    }
+
+    if (cleanupError !== undefined) {
+      // The model result is already complete; a teardown failure must not replace
+      // valid inference output. Mark the pipeline unusable until dispose() retries.
+      console.warn('[text-gen] LiteRT-LM conversation cleanup failed', cleanupError);
+    }
+    return result!;
   }
 
   async dispose(): Promise<void> {
     // Record disposal before anything else so an in-flight load cannot overwrite it.
     this.disposed = true;
-    // Stop an in-flight model download even when the caller wired no signal.
     this.loadAbort?.abort();
     this.loadAbort = null;
-    // Invalidate any load still awaiting a result.
     this.loadToken += 1;
+
     const conversation = this.conversation;
+    const pendingConversationCleanup = this.conversationCleanup;
     const engine = this.engine;
     this.conversation = null;
     this.engine = null;
     this.status = 'disposed';
-    // Each cleanup gets an attempt even if the other rejects. Keep the terminal
-    // state truthful and propagate cleanup errors to the caller.
+
     const errors: unknown[] = [];
-    try { await conversation?.delete(); } catch (error) { errors.push(error); }
+    let pendingCleanupError: unknown;
+    if (pendingConversationCleanup) {
+      try {
+        await pendingConversationCleanup;
+      } catch (error) {
+        pendingCleanupError = error;
+      }
+    }
+
+    // If run() was already deleting this conversation, only retry when that
+    // cleanup failed. Otherwise cancel active generation before deleting.
+    if (conversation && (!pendingConversationCleanup || pendingCleanupError !== undefined)) {
+      if (!pendingConversationCleanup) {
+        try { conversation.cancel(); } catch { /* best-effort cancellation */ }
+      }
+      try {
+        await conversation.delete();
+        pendingCleanupError = undefined;
+      } catch (error) {
+        if (pendingCleanupError !== undefined) errors.push(pendingCleanupError);
+        errors.push(error);
+      }
+    } else if (pendingCleanupError !== undefined) {
+      errors.push(pendingCleanupError);
+    }
+
     try { await engine?.delete(); } catch (error) { errors.push(error); }
     if (errors.length === 1) throw errors[0];
     if (errors.length > 1) throw Object.assign(new Error('Pipeline cleanup failed'), { errors });

@@ -242,30 +242,21 @@ describe("LiteRtLmTextPipeline", () => {
     ]);
   });
 
-  it("forwards tools into the conversation preface and streams tool calls", async () => {
+  it("batches complete tool calls until stream completion and normalizes JSON-string arguments", async () => {
     const onToolCall = vi.fn();
+    let streamController!: ReadableStreamDefaultController<{ tool_calls?: unknown[] }>;
     mockSendMessageStreaming.mockReturnValue(
-      new ReadableStream({
+      new ReadableStream<{ tool_calls?: unknown[] }>({
         start(controller) {
-          controller.enqueue({
-            tool_calls: [
-              {
-                function: {
-                  name: "calculate",
-                  arguments: { expression: "2+2" },
-                },
-              },
-            ],
-          });
-          controller.close();
+          streamController = controller;
         },
       }),
     );
 
     const p = new LiteRtLmTextPipeline();
     await p.load(fakeContext());
-    await p.run(
-      { systemPrompt: "Use tools when useful.", messages: [{ role: "user", content: "2+2?" }] },
+    const running = p.run(
+      { messages: [{ role: "user", content: "2+2?" }] },
       {
         tools: [
           {
@@ -282,17 +273,74 @@ describe("LiteRtLmTextPipeline", () => {
       },
     );
 
+    streamController.enqueue({
+      tool_calls: [
+        {
+          type: "function",
+          function: {
+            name: "calculate",
+            arguments: '{"expression":"2+2"}',
+          },
+        },
+      ],
+    });
+    await Promise.resolve();
+    expect(onToolCall).not.toHaveBeenCalled();
+
+    streamController.enqueue({
+      tool_calls: [
+        {
+          type: "function",
+          function: {
+            name: "lookup",
+            arguments: { topic: "math" },
+          },
+        },
+      ],
+    });
+    streamController.close();
+    await running;
+
     expect(mockCreateConversation).toHaveBeenCalledWith(
       expect.objectContaining({
-        preface: expect.objectContaining({
-          messages: [{ role: "system", content: "Use tools when useful." }],
+        preface: {
           tools: [expect.objectContaining({ name: "calculate" })],
-        }),
+        },
       }),
     );
+    expect(onToolCall).toHaveBeenCalledTimes(1);
     expect(onToolCall).toHaveBeenCalledWith([
       { name: "calculate", arguments: { expression: "2+2" } },
+      { name: "lookup", arguments: { topic: "math" } },
     ]);
+  });
+
+  it("rejects malformed streamed tool calls instead of dropping them silently", async () => {
+    mockSendMessageStreaming.mockReturnValue(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({
+            tool_calls: [
+              {
+                type: "function",
+                function: { name: "", arguments: {} },
+              },
+            ],
+          });
+          controller.close();
+        },
+      }),
+    );
+
+    const p = new LiteRtLmTextPipeline();
+    await p.load(fakeContext());
+
+    await expect(
+      p.run(
+        { messages: [{ role: "user", content: "use the tool" }] },
+        { onToolCall: vi.fn() },
+      ),
+    ).rejects.toMatchObject({ code: "OUTPUT_INVALID" });
   });
 
   it("releases each completed conversation before the next run", async () => {
@@ -371,6 +419,46 @@ describe("LiteRtLmTextPipeline", () => {
     expect(mockEngineCreate).toHaveBeenCalledWith(
       expect.objectContaining({ backend: "wasm" })
     );
+  });
+
+  it("rejects WebNN instead of silently selecting another backend", async () => {
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+    await expect(
+      p.load({ ...fakeContext(), backend: "webnn" })
+    ).rejects.toMatchObject({ code: "BACKEND_UNAVAILABLE" });
+    expect(mockEngineCreate).not.toHaveBeenCalled();
+  });
+
+  it("requests a fresh caller-owned stream from the factory on retry", async () => {
+    const sources: ReadableStream<Uint8Array>[] = [];
+    const modelFactory = vi.fn(() => {
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([sources.length + 1]));
+          controller.close();
+        },
+      });
+      sources.push(stream);
+      return stream;
+    });
+    mockEngineCreate
+      .mockRejectedValueOnce(new Error("compile failed"))
+      .mockResolvedValueOnce({
+        createConversation: mockCreateConversation,
+        delete: vi.fn(async () => undefined),
+      });
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+      model: modelFactory,
+    });
+
+    await expect(p.loadForBackend("wasm")).rejects.toThrow("compile failed");
+    await expect(p.loadForBackend("wasm")).resolves.toBeUndefined();
+
+    expect(modelFactory).toHaveBeenCalledTimes(2);
+    expect(sources).toHaveLength(2);
+    expect(mockEngineCreate.mock.calls[0][0].model).toBe(sources[0]);
+    expect(mockEngineCreate.mock.calls[1][0].model).toBe(sources[1]);
   });
 
   // The manifest path is repo-relative. Handing it to the engine raw makes the
@@ -656,11 +744,14 @@ describe('LiteRtLmTextPipeline disposal boundaries', () => {
     expect(p.status).toBe('disposed')
   })
 
-  it('reports completed-run conversation cleanup failures without retaining ownership', async () => {
+  it('preserves completed inference when conversation cleanup fails and dispose retries it', async () => {
     const cleanupError = new Error('conversation delete failed')
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const conversation = {
       sendMessage: vi.fn(), sendMessageStreaming: mockSendMessageStreaming, cancel: vi.fn(),
-      delete: vi.fn().mockRejectedValue(cleanupError),
+      delete: vi.fn()
+        .mockRejectedValueOnce(cleanupError)
+        .mockResolvedValueOnce(undefined),
     }
     const engine = {
       createConversation: vi.fn().mockResolvedValue(conversation),
@@ -670,12 +761,91 @@ describe('LiteRtLmTextPipeline disposal boundaries', () => {
     const p = new LiteRtLmTextPipeline()
     await p.load(fakeContext())
 
-    await expect(p.run({ messages: [{ role: 'user', content: 'hi' }] })).rejects.toBe(cleanupError)
+    await expect(p.run({ messages: [{ role: 'user', content: 'hi' }] })).resolves.toMatchObject({
+      kind: 'text',
+      text: 'Hello from litert-lm',
+    })
     expect(conversation.delete).toHaveBeenCalledTimes(1)
-    expect(p).toHaveProperty('conversation', null)
-    expect(p.status).toBe('ready')
+    expect(p).toHaveProperty('conversation', conversation)
+    expect(p.status).toBe('error')
+    expect(warn).toHaveBeenCalledWith(
+      '[text-gen] LiteRT-LM conversation cleanup failed',
+      cleanupError,
+    )
 
     await expect(p.dispose()).resolves.toBeUndefined()
+    expect(conversation.delete).toHaveBeenCalledTimes(2)
+    expect(engine.delete).toHaveBeenCalledTimes(1)
+    expect(p.status).toBe('disposed')
+    warn.mockRestore()
+  })
+
+  it('preserves the primary inference failure when conversation cleanup also fails', async () => {
+    const primaryError = new Error('generation failed')
+    const cleanupError = new Error('conversation delete failed')
+    const conversation = {
+      sendMessage: vi.fn(),
+      sendMessageStreaming: vi.fn(() => new ReadableStream({
+        start(controller) { controller.error(primaryError) },
+      })),
+      cancel: vi.fn(),
+      delete: vi.fn()
+        .mockRejectedValueOnce(cleanupError)
+        .mockResolvedValueOnce(undefined),
+    }
+    const engine = {
+      createConversation: vi.fn().mockResolvedValue(conversation),
+      delete: vi.fn().mockResolvedValue(undefined),
+    }
+    mockEngineCreate.mockResolvedValue(engine)
+    const p = new LiteRtLmTextPipeline()
+    await p.load(fakeContext())
+
+    let caught: Error & { cause?: unknown } | undefined
+    try {
+      await p.run({ messages: [{ role: 'user', content: 'hi' }] })
+    } catch (error) {
+      caught = error as Error & { cause?: unknown }
+    }
+
+    expect(caught).toBe(primaryError)
+    expect(caught?.cause).toBe(cleanupError)
+    expect(p.status).toBe('error')
+    await expect(p.dispose()).resolves.toBeUndefined()
+  })
+
+  it('does not publish ready or delete the engine before conversation cleanup settles', async () => {
+    let releaseCleanup!: () => void
+    const cleanup = new Promise<void>((resolve) => { releaseCleanup = resolve })
+    const conversation = {
+      sendMessage: vi.fn(),
+      sendMessageStreaming: mockSendMessageStreaming,
+      cancel: vi.fn(),
+      delete: vi.fn(() => cleanup),
+    }
+    const engine = {
+      createConversation: vi.fn().mockResolvedValue(conversation),
+      delete: vi.fn().mockResolvedValue(undefined),
+    }
+    mockEngineCreate.mockResolvedValue(engine)
+    const p = new LiteRtLmTextPipeline()
+    await p.load(fakeContext())
+
+    const running = p.run({ messages: [{ role: 'user', content: 'hi' }] })
+    await waitFor(() => conversation.delete.mock.calls.length === 1, 'conversation cleanup to start')
+
+    expect(p.status).toBe('running')
+    await expect(p.run({ messages: [{ role: 'user', content: 'second' }] })).rejects.toThrow(
+      'Pipeline not ready',
+    )
+
+    const disposing = p.dispose()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(engine.delete).not.toHaveBeenCalled()
+
+    releaseCleanup()
+    await running
+    await disposing
     expect(engine.delete).toHaveBeenCalledTimes(1)
     expect(p.status).toBe('disposed')
   })

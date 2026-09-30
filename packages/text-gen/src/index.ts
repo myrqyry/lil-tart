@@ -29,6 +29,8 @@ export type {
 } from './manifest'
 export type { TransformersTextConfig } from './transformers-pipeline'
 export type {
+  LiteRtLmBackend,
+  LiteRtLmModelSource,
   LiteRtLmTextConfig,
   LiteRtLmTextPipelineOptions,
   LiteRtLmToolCall,
