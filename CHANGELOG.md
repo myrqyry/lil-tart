@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `@litert-playground/text-gen` now accepts caller-owned LiteRT-LM model inputs (URL, Blob, or stream) and exposes `loadForBackend()`, so downstream apps can reuse their own persistent model cache without fabricating unrelated runtime services.
 - Shared downstream inference compatibility now covers browser cache, text generation, encoder embeddings, ColBERT retrieval, Kokoro, Qwen3-TTS, image embeddings, and video classification from their packed public entrypoints.
 - `feat(playground)`: wire adapters to Hugging Face and flag missing models (`apps/playground/src/adapters/*`, `types.ts`, `ModelList.tsx`, `ModelRunner.tsx`)
 - `feat`: add model-server base URL input to `ModelRunner` (`apps/playground/src/hooks/useModelRunner.ts`, `ModelRunner.tsx`)
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix(playground)`: replace 12 empty adapters (`sam2` ×2, `vision` ×10 including `6drepnet`, `blaze-face`, `yolox`, `u2net`, `edsr`, `migan`, `style-*`) with working `prepareInputs`/`parseOutputs` (`apps/playground/src/adapters/sam2.ts:16`, `apps/playground/src/adapters/vision.ts:70`)
 
 ### Fixed
+- `fix(tooling)`: pin the pnpm dev-engine to an exact 11.17.0 version so pnpm can validate and run the repository gate.
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: preserve caller-signal cancellation checks from `2200684` when combining late-result and disposal cleanup fixes
 - `encoder` and `retrieval` now keep `inference-core` as a peer contract instead of leaking `workspace:*` into downstream package metadata.
 - `fix(playground)`: resolve LFM pipeline model assets from Hugging Face instead of the app origin, so packaged consumers load the same weights as the app

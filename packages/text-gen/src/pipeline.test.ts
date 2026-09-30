@@ -200,6 +200,42 @@ describe("LiteRtLmTextPipeline", () => {
     );
   });
 
+  it("accepts a caller-owned model input without fetching it again", async () => {
+    const original = globalThis.fetch;
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const cachedModel = new Blob([new Uint8Array([1, 2, 3])]);
+
+    try {
+      const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest, {
+        model: cachedModel,
+        maxContextTokens: 8192,
+      });
+      await p.loadForBackend("webgpu");
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mockEngineCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          model: cachedModel,
+          backend: "webgpu",
+          mainExecutorSettings: { maxNumTokens: 8192 },
+        })
+      );
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("loads from a backend without requiring unrelated runtime services", async () => {
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+    await p.loadForBackend("wasm");
+
+    expect(p.status).toBe("ready");
+    expect(mockEngineCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ backend: "wasm" })
+    );
+  });
+
   // The manifest path is repo-relative. Handing it to the engine raw makes the
   // browser resolve it against the app origin, which 404s, so it has to be made
   // absolute. The pipeline hands the response body to the engine: routing through
