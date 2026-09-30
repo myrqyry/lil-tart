@@ -63,7 +63,7 @@ interface StreamChunk {
   // Treat tool payloads as untrusted at this package boundary. The current
   // @litert-lm/core type is stricter than values observed across integrations,
   // so normalization below owns validation instead of a cast.
-  tool_calls?: unknown[];
+  tool_calls?: unknown;
 }
 
 export interface LiteRtLmToolCall {
@@ -80,6 +80,10 @@ export interface LiteRtLmTextConfig extends TextGenerationConfig {
   tools?: Tool[];
   onToken?: (text: string) => void;
   onReasoning?: (text: string) => void;
+  /**
+   * Called once, after a tool-bearing stream completes successfully.
+   * Buffered calls are intentionally not emitted from an aborted/failed turn.
+   */
   onToolCall?: (calls: LiteRtLmToolCall[]) => void;
 }
 
@@ -231,7 +235,15 @@ async function readStream(
           reasoning += reason;
           onReasoning?.(reason);
         }
-        if (value.tool_calls?.length) streamedToolCalls.push(...value.tool_calls);
+        if (value.tool_calls !== undefined && value.tool_calls !== null) {
+          if (!Array.isArray(value.tool_calls)) {
+            throw new InferenceError(
+              'OUTPUT_INVALID',
+              'LiteRT-LM returned a non-array tool_calls payload',
+            );
+          }
+          streamedToolCalls.push(...value.tool_calls);
+        }
       }
     }
     // @litert-lm/core's conversation contract emits complete ToolCall objects,
@@ -325,7 +337,11 @@ export class LiteRtLmTextPipeline
   }
 
   async load(context: RuntimeContext): Promise<void> {
-    return this.loadInternal(context.backend, context.signal);
+    // RuntimeContext can select WebNN before this package gets a vote. LiteRT-LM
+    // does not expose a WebNN backend, so preserve the runtime path's historical
+    // degradation behavior and let the engine choose a supported backend.
+    const backend = context.backend === 'webnn' ? undefined : context.backend;
+    return this.loadInternal(backend, context.signal);
   }
 
   /**
@@ -334,18 +350,29 @@ export class LiteRtLmTextPipeline
    * fabricating unrelated LiteRT tensor/runtime services.
    */
   async loadForBackend(backend: LiteRtLmBackend, signal?: AbortSignal): Promise<void> {
+    // Keep a runtime check for untyped/JavaScript callers even though TypeScript
+    // excludes WebNN from LiteRtLmBackend.
+    if ((backend as Backend) === 'webnn') {
+      throw new InferenceError(
+        'BACKEND_UNAVAILABLE',
+        'LiteRT-LM text generation does not support the WebNN backend',
+      );
+    }
     return this.loadInternal(backend, signal);
   }
 
-  private async loadInternal(backend: Backend, signal?: AbortSignal): Promise<void> {
+  private async loadInternal(
+    backend: LiteRtLmBackend | undefined,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (this.status === 'ready') return;
     if (this.disposed) {
       throw new InferenceError('CANCELLED', 'Pipeline was disposed and cannot load again');
     }
-    if (backend === 'webnn') {
+    if (this.engine) {
       throw new InferenceError(
-        'BACKEND_UNAVAILABLE',
-        'LiteRT-LM text generation does not support the WebNN backend',
+        'INFERENCE_FAILED',
+        'LiteRT-LM still owns a native engine after a failed conversation cleanup; dispose the pipeline before loading again',
       );
     }
     this.status = 'loading';

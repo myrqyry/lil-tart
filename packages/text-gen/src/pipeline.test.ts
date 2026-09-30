@@ -343,6 +343,71 @@ describe("LiteRtLmTextPipeline", () => {
     ).rejects.toMatchObject({ code: "OUTPUT_INVALID" });
   });
 
+  it("rejects a non-array tool_calls payload at the runtime boundary", async () => {
+    mockSendMessageStreaming.mockReturnValue(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue({ tool_calls: "not-an-array" });
+          controller.close();
+        },
+      }),
+    );
+
+    const p = new LiteRtLmTextPipeline();
+    await p.load(fakeContext());
+
+    await expect(
+      p.run(
+        { messages: [{ role: "user", content: "use the tool" }] },
+        { onToolCall: vi.fn() },
+      ),
+    ).rejects.toMatchObject({ code: "OUTPUT_INVALID" });
+  });
+
+  it("does not emit buffered tool calls from an aborted turn", async () => {
+    let streamController!: ReadableStreamDefaultController<{
+      tool_calls?: unknown;
+      text?: string;
+    }>;
+    let waitingForNextChunk = false;
+    mockSendMessageStreaming.mockReturnValue(
+      new ReadableStream({
+        start(controller) {
+          streamController = controller;
+          controller.enqueue({
+            tool_calls: [
+              {
+                type: "function",
+                function: { name: "calculate", arguments: { expression: "2+2" } },
+              },
+            ],
+          });
+        },
+        pull() {
+          waitingForNextChunk = true;
+        },
+      }),
+    );
+
+    const controller = new AbortController();
+    const onToolCall = vi.fn();
+    const p = new LiteRtLmTextPipeline();
+    await p.load(fakeContext());
+    const running = p.run(
+      { messages: [{ role: "user", content: "2+2?" }] },
+      { onToolCall },
+      controller.signal,
+    );
+
+    await waitFor(() => waitingForNextChunk, "stream to wait for its next chunk");
+    controller.abort();
+    streamController.enqueue({ text: "" });
+    streamController.close();
+
+    await expect(running).rejects.toThrow("CANCELLED");
+    expect(onToolCall).not.toHaveBeenCalled();
+  });
+
   it("releases each completed conversation before the next run", async () => {
     const deletes: Array<ReturnType<typeof vi.fn>> = [];
     const createConversation = vi.fn(async () => {
@@ -421,10 +486,19 @@ describe("LiteRtLmTextPipeline", () => {
     );
   });
 
-  it("rejects WebNN instead of silently selecting another backend", async () => {
+  it("lets RuntimeContext WebNN degrade to the engine's supported backend selection", async () => {
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+    await p.load({ ...fakeContext(), backend: "webnn" });
+
+    expect(mockEngineCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ backend: undefined }),
+    );
+  });
+
+  it("rejects explicit WebNN requests through the backend-only entrypoint", async () => {
     const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
     await expect(
-      p.load({ ...fakeContext(), backend: "webnn" })
+      p.loadForBackend("webnn" as never),
     ).rejects.toMatchObject({ code: "BACKEND_UNAVAILABLE" });
     expect(mockEngineCreate).not.toHaveBeenCalled();
   });
@@ -772,6 +846,9 @@ describe('LiteRtLmTextPipeline disposal boundaries', () => {
       '[text-gen] LiteRT-LM conversation cleanup failed',
       cleanupError,
     )
+
+    await expect(p.load(fakeContext())).rejects.toMatchObject({ code: 'INFERENCE_FAILED' })
+    expect(mockEngineCreate).toHaveBeenCalledTimes(1)
 
     await expect(p.dispose()).resolves.toBeUndefined()
     expect(conversation.delete).toHaveBeenCalledTimes(2)

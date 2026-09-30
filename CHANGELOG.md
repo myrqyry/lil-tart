@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix(playground)`: replace 12 empty adapters (`sam2` ×2, `vision` ×10 including `6drepnet`, `blaze-face`, `yolox`, `u2net`, `edsr`, `migan`, `style-*`) with working `prepareInputs`/`parseOutputs` (`apps/playground/src/adapters/sam2.ts:16`, `apps/playground/src/adapters/vision.ts:70`)
 
 ### Fixed
-- `fix(text-gen)`: harden downstream LiteRT-LM lifecycle after review: accumulate tool calls until stream completion, normalize runtime tool arguments, require renewable factories for caller-owned streams, reject unsupported WebNN requests, preserve completed inference and primary errors across cleanup failures, and keep the pipeline busy until conversation teardown settles.
+- `fix(text-gen)`: harden downstream LiteRT-LM lifecycle after review: validate and accumulate tool calls until clean stream completion, normalize runtime tool arguments, require renewable factories for caller-owned streams, reject explicit WebNN requests while preserving RuntimeContext fallback, prevent reload from orphaning an engine after cleanup failure, preserve completed inference and primary errors across cleanup failures, and keep the pipeline busy until conversation teardown settles.
 - `fix(tooling)`: pin the pnpm dev-engine to an exact 11.17.0 version so pnpm can validate and run the repository gate.
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: preserve caller-signal cancellation checks from `2200684` when combining late-result and disposal cleanup fixes
 - `encoder` and `retrieval` now keep `inference-core` as a peer contract instead of leaking `workspace:*` into downstream package metadata.
