@@ -174,6 +174,64 @@ describe('manifest-verifying asset resolver', () => {
       .rejects.toMatchObject({ code: 'ASSET_INTEGRITY_FAILED', asset: 'model' })
   })
 
+  it('cancels unknown-size SHA streams as soon as the in-memory ceiling is exceeded', async () => {
+    const cancel = vi.fn()
+    let sent = false
+    const inner = resolver({
+      stream: vi.fn().mockResolvedValue(
+        new ReadableStream({
+          pull(controller) {
+            if (sent) return
+            sent = true
+            controller.enqueue(new Uint8Array([1, 2, 3]))
+          },
+          cancel,
+        }),
+      ),
+    })
+    const verifying = createManifestVerifyingAssetResolver(
+      {
+        ...manifest,
+        assets: [{ id: 'model', path: 'model.bin', sha256: '00'.repeat(32) }],
+      },
+      inner,
+      { maxSha256Bytes: 2 },
+    )
+
+    await expect(verifying.stream!({ id: 'model', path: 'model.bin' }))
+      .rejects.toMatchObject({ code: 'ASSET_INTEGRITY_FAILED', asset: 'model' })
+    expect(cancel).toHaveBeenCalled()
+  })
+
+  it('cancels SHA buffering as soon as streamed bytes exceed the declared length', async () => {
+    const cancel = vi.fn()
+    let sent = false
+    const inner = resolver({
+      stream: vi.fn().mockResolvedValue(
+        new ReadableStream({
+          pull(controller) {
+            if (sent) return
+            sent = true
+            controller.enqueue(new Uint8Array([1, 2, 3]))
+          },
+          cancel,
+        }),
+      ),
+    })
+    const verifying = createManifestVerifyingAssetResolver(
+      {
+        ...manifest,
+        assets: [{ id: 'model', path: 'model.bin', bytes: 2, sha256: '00'.repeat(32) }],
+      },
+      inner,
+      { maxSha256Bytes: 4 },
+    )
+
+    await expect(verifying.stream!({ id: 'model', path: 'model.bin' }))
+      .rejects.toMatchObject({ code: 'ASSET_INTEGRITY_FAILED', asset: 'model' })
+    expect(cancel).toHaveBeenCalled()
+  })
+
   it('does not require absent verification facts', async () => {
     await expect(
       createManifestVerifyingAssetResolver(manifest, resolver()).resolve({ id: 'model', path: 'model.bin' }),

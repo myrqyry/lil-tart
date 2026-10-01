@@ -1,8 +1,11 @@
 import {
   createHttpAssetResolver,
+  createManifestVerifyingAssetResolver,
+  type AssetIntegrityVerificationOptions,
   type AssetRequestOptions,
   type AssetResolver,
   type ModelAsset,
+  type ModelManifest,
 } from '@litert-playground/inference-core'
 
 const CACHE_NAME = 'lil-tart-model-library-v1'
@@ -14,6 +17,11 @@ export interface StoredModelInfo {
   bytes: number
   assets: number
   unverified?: boolean
+}
+
+export interface ModelLibraryIntegrityOptions {
+  manifest: ModelManifest
+  verificationOptions?: AssetIntegrityVerificationOptions
 }
 
 function pageBase(): string {
@@ -81,13 +89,32 @@ export function registerModelAssets(modelId: string, paths: readonly string[]): 
   }
 }
 
-export function createModelLibraryAssetResolver(base: string): AssetResolver {
+export function createModelLibraryAssetResolver(
+  base: string,
+  integrity?: ModelLibraryIntegrityOptions,
+): AssetResolver {
   const inner = createHttpAssetResolver(base)
+  const verifiedSource = integrity
+    ? createManifestVerifyingAssetResolver(
+        integrity.manifest,
+        inner,
+        integrity.verificationOptions,
+      )
+    : inner
+
+  async function verifyCached(asset: ModelAsset, value: ArrayBuffer): Promise<ArrayBuffer> {
+    if (!integrity) return value
+    return createManifestVerifyingAssetResolver(
+      integrity.manifest,
+      { resolve: async () => value },
+      integrity.verificationOptions,
+    ).resolve(asset)
+  }
 
   async function resolve(asset: ModelAsset, options?: AssetRequestOptions): Promise<ArrayBuffer> {
     const owner = assetOwners.get(asset.path) ?? assetOwners.get(asset.id)
     const storage = cacheStorage()
-    if (!owner || !storage) return inner.resolve(asset, options)
+    if (!owner || !storage) return verifiedSource.resolve(asset, options)
 
     const assetUrl = resolvedAssetUrl(asset.path, base)
     const key = cacheKey(owner, assetUrl)
@@ -96,12 +123,21 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
     try {
       cache = await storage.open(CACHE_NAME)
       const cached = await cache.match(key)
-      if (cached) return cached.arrayBuffer()
+      if (cached) {
+        try {
+          return await verifyCached(asset, await cached.arrayBuffer())
+        } catch {
+          // A bad persisted entry must not poison every retry. Remove it and
+          // fall through to a fresh verified fetch.
+          await cache.delete(key)
+        }
+      }
     } catch {
       cache = null
     }
 
-    const fresh = await inner.resolve(asset, options)
+    // Integrity-aware callers verify fresh bytes before they are persisted.
+    const fresh = await verifiedSource.resolve(asset, options)
     if (cache) {
       try {
         await cache.put(

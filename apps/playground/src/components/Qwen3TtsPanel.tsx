@@ -7,7 +7,7 @@ import {
 } from '@litert-playground/qwen3-tts'
 import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
 import { createModelLibraryAssetResolver, registerModelAssets } from '../modelStorage'
-import { createManifestVerifyingAssetResolver, type PipelineProgress } from '@litert-playground/inference-core'
+import { type PipelineProgress } from '@litert-playground/inference-core'
 
 let pipeline: Qwen3TtsPipeline | null = null
 
@@ -66,11 +66,12 @@ export function Qwen3TtsPanel() {
 
       const ctx = await createLiteRtRuntime({
         assetBase: '/models/qwen3-tts',
-        assets: createManifestVerifyingAssetResolver(
-          p.manifest,
-          createModelLibraryAssetResolver('/models/qwen3-tts/'),
-          { maxSha256Bytes: QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES },
-        ),
+        assets: createModelLibraryAssetResolver('/models/qwen3-tts/', {
+          manifest: p.manifest,
+          verificationOptions: {
+            maxSha256Bytes: QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES,
+          },
+        }),
       })
       ctxRef.current = ctx
       await p.load(ctx)
