@@ -95,6 +95,7 @@ describe('LiteRT-LM worker dispatch', () => {
     });
   });
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -188,28 +189,71 @@ describe('LiteRT-LM worker dispatch', () => {
     expect(liteRt.conversationCancel).not.toHaveBeenCalled();
   });
 
-  it('preserves successful LiteRT generation when conversation cleanup fails', async () => {
+  it('preserves successful LiteRT generation and retries failed cleanup during dispose', async () => {
     const { scope, messages } = await bootWorker();
     send(scope, { type: 'load', model: 'model.litertlm' });
     await flushWorker();
 
     const cleanupError = new Error('conversation delete failed');
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    liteRt.conversationDelete.mockRejectedValueOnce(cleanupError);
+    liteRt.conversationDelete
+      .mockRejectedValueOnce(cleanupError)
+      .mockResolvedValueOnce(undefined);
 
     send(scope, { type: 'generate', id: 'cleanup-failed', prompt: 'hello' });
     await flushWorker();
 
-    expect(messages).toContainEqual({ type: 'complete', id: 'cleanup-failed' });
-    expect(messages).not.toContainEqual(expect.objectContaining({
-      type: 'error',
-      id: 'cleanup-failed',
-    }));
+    const terminal = messages.filter(
+      (message) =>
+        'id' in message &&
+        message.id === 'cleanup-failed' &&
+        (message.type === 'complete' || message.type === 'cancelled' || message.type === 'error'),
+    );
+    expect(terminal).toEqual([{ type: 'complete', id: 'cleanup-failed' }]);
     expect(warn).toHaveBeenCalledWith(
       '[text-gen worker] LiteRT-LM conversation cleanup failed',
       cleanupError,
+      '(not attached to primary error)',
     );
-    warn.mockRestore();
+    expect(liteRt.conversationDelete).toHaveBeenCalledTimes(1);
+
+    send(scope, { type: 'dispose' });
+    await flushWorker();
+
+    expect(liteRt.conversationDelete).toHaveBeenCalledTimes(2);
+    expect(liteRt.engineDelete).toHaveBeenCalledTimes(1);
+    expect(messages).toContainEqual({ type: 'disposed' });
+  });
+
+  it('warns when cleanup cannot be attached to a non-Error generation failure', async () => {
+    const { scope, messages } = await bootWorker();
+    send(scope, { type: 'load', model: 'model.litertlm' });
+    await flushWorker();
+
+    const cleanupError = new Error('conversation delete failed');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    liteRt.sendMessageStreaming.mockReturnValueOnce(
+      new ReadableStream({
+        start(controller) {
+          controller.error('generation failed');
+        },
+      }),
+    );
+    liteRt.conversationDelete.mockRejectedValueOnce(cleanupError);
+
+    send(scope, { type: 'generate', id: 'non-error-failure', prompt: 'hello' });
+    await flushWorker();
+
+    expect(messages).toContainEqual({
+      type: 'error',
+      id: 'non-error-failure',
+      message: 'generation failed',
+    });
+    expect(warn).toHaveBeenCalledWith(
+      '[text-gen worker] LiteRT-LM conversation cleanup failed',
+      cleanupError,
+      '(not attached to primary error)',
+    );
   });
 
   it('emits only cancelled when cancellation lands during LiteRT conversation deletion', async () => {

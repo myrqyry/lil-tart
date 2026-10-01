@@ -130,8 +130,10 @@ async function streamResponse(
 
 async function disposeConversation(id: string, conversation: Conversation): Promise<void> {
   if (activeConversations.get(id) !== conversation) return;
-  activeConversations.delete(id);
   await conversation.delete();
+  if (activeConversations.get(id) === conversation) {
+    activeConversations.delete(id);
+  }
 }
 
 function toLiteRtLmText(prompt: LiteRtLmWorkerPrompt): string {
@@ -181,14 +183,27 @@ async function generateLiteRtLm(
   try {
     await disposeConversation(id, conversation);
   } catch (cleanupError) {
-    if (generationFailed) {
-      if (generationError instanceof Error) {
-        const errorWithCause = generationError as Error & { cause?: unknown };
-        if (errorWithCause.cause === undefined) errorWithCause.cause = cleanupError;
+    let attachedToPrimary = false;
+    if (generationFailed && generationError !== null) {
+      const kind = typeof generationError;
+      if (kind === 'object' || kind === 'function') {
+        try {
+          const errorWithCause = generationError as { cause?: unknown };
+          if (errorWithCause.cause === undefined) {
+            errorWithCause.cause = cleanupError;
+            attachedToPrimary = errorWithCause.cause === cleanupError;
+          }
+        } catch {
+          // Frozen/cross-realm throwables may reject mutation; warn below.
+        }
       }
-    } else {
-      console.warn('[text-gen worker] LiteRT-LM conversation cleanup failed', cleanupError);
     }
+
+    console.warn(
+      '[text-gen worker] LiteRT-LM conversation cleanup failed',
+      cleanupError,
+      attachedToPrimary ? '(attached to primary error)' : '(not attached to primary error)',
+    );
   }
 
   if (generationFailed) throw generationError;
