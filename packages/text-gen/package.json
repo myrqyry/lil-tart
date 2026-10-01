@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@litert-lm/core": "^0.15.0",
-    "@huggingface/transformers": "^3.8.1"
+    "@huggingface/transformers": "^3.8.1",
+    "@mediapipe/tasks-genai": "0.10.29"
   },
   "devDependencies": {
     "@litert-playground/inference-core": "workspace:*",

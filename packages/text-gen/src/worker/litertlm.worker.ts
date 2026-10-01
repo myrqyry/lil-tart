@@ -1,8 +1,15 @@
-import type { Message, SamplerParameters, SessionConfig } from '@litert-lm/core';
-import type { ConversationConfig } from '@litert-lm/core';
 import type {
+  ConversationConfig,
+  Message,
+  SamplerParameters,
+  SessionConfig,
+} from '@litert-lm/core';
+import { MediaPipeMultimodalEngine } from './mediapipe-engine';
+import type {
+  LiteRtLmWorkerEngine,
   LiteRtLmWorkerGenerationConfig,
   LiteRtLmWorkerMessage,
+  LiteRtLmWorkerPrompt,
   LiteRtLmWorkerRequest,
   LiteRtLmWorkerResponse,
 } from './protocol';
@@ -37,8 +44,14 @@ type Conversation = Awaited<ReturnType<LiteRtLmEngine['createConversation']>>;
 
 const worker = self as unknown as WorkerScope;
 
-let engine: LiteRtLmEngine | undefined;
+let liteRtLmEngine: LiteRtLmEngine | undefined;
+let mediaPipeEngine: MediaPipeMultimodalEngine | undefined;
+let activeEngine: LiteRtLmWorkerEngine = 'litert-lm';
+let dispatchQueue: Promise<void> = Promise.resolve();
 const activeConversations = new Map<string, Conversation>();
+const mediaPipeGenerationIds = new Set<string>();
+const knownGenerationIds = new Set<string>();
+const cancelledGenerations = new Set<string>();
 
 function extractText(message: Message): string {
   if (typeof message.content === 'string') return message.content;
@@ -87,8 +100,6 @@ function buildConversationConfig(config?: LiteRtLmWorkerGenerationConfig): Conve
 
 async function replayHistory(conversation: Conversation, history?: LiteRtLmWorkerMessage[]): Promise<void> {
   if (!history?.length) return;
-  // LiteRT-LM populates the conversation KV cache on each send, so history
-  // must be replayed in order rather than in parallel.
   for (const message of history) {
     await conversation.sendMessage({
       role: message.role === 'assistant' ? 'model' : message.role,
@@ -97,7 +108,10 @@ async function replayHistory(conversation: Conversation, history?: LiteRtLmWorke
   }
 }
 
-async function streamResponse(stream: ReadableStream<Message>, onMessage: (message: Message) => void): Promise<void> {
+async function streamResponse(
+  stream: ReadableStream<Message>,
+  onMessage: (message: Message) => void,
+): Promise<void> {
   if (Symbol.asyncIterator in stream) {
     for await (const chunk of stream) onMessage(chunk);
   } else {
@@ -116,25 +130,118 @@ async function streamResponse(stream: ReadableStream<Message>, onMessage: (messa
 
 async function disposeConversation(id: string, conversation: Conversation): Promise<void> {
   if (activeConversations.get(id) !== conversation) return;
-  activeConversations.delete(id);
   await conversation.delete();
+  if (activeConversations.get(id) === conversation) {
+    activeConversations.delete(id);
+  }
 }
 
-async function generate(id: string, prompt: string, config?: LiteRtLmWorkerGenerationConfig): Promise<void> {
-  if (!engine) throw new Error('LiteRT-LM is not loaded');
-  const conversation = await engine.createConversation(buildConversationConfig(config));
+function toLiteRtLmText(prompt: LiteRtLmWorkerPrompt): string {
+  if (typeof prompt === 'string') return prompt;
+  if (prompt.some((part) => part.type !== 'text')) {
+    throw new Error(
+      'LiteRT-LM JavaScript currently supports text-only prompts; load the worker with engine="mediapipe" for image/audio input',
+    );
+  }
+  return prompt
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('');
+}
+
+async function generateLiteRtLm(
+  id: string,
+  prompt: LiteRtLmWorkerPrompt,
+  config?: LiteRtLmWorkerGenerationConfig,
+): Promise<void> {
+  if (cancelledGenerations.has(id)) return;
+  if (!liteRtLmEngine) throw new Error('LiteRT-LM is not loaded');
+  const conversation = await liteRtLmEngine.createConversation(buildConversationConfig(config));
+  if (cancelledGenerations.has(id)) {
+    await conversation.delete();
+    return;
+  }
+
   activeConversations.set(id, conversation);
+  let generationFailed = false;
+  let generationError: unknown;
   try {
     await replayHistory(conversation, config?.history);
-    await streamResponse(conversation.sendMessageStreaming({ role: 'user', content: prompt }), (message) => {
-      const reasoning = extractReasoning(message);
-      if (reasoning) emit({ type: 'reasoning', id, text: reasoning });
-      const text = extractText(message);
-      if (text) emit({ type: 'token', id, text });
-    });
-    emit({ type: 'complete', id });
-  } finally {
+    await streamResponse(
+      conversation.sendMessageStreaming({ role: 'user', content: toLiteRtLmText(prompt) }),
+      (message) => {
+        const reasoning = extractReasoning(message);
+        if (reasoning) emit({ type: 'reasoning', id, text: reasoning });
+        const text = extractText(message);
+        if (text) emit({ type: 'token', id, text });
+      },
+    );
+  } catch (error) {
+    generationFailed = true;
+    generationError = error;
+  }
+
+  try {
     await disposeConversation(id, conversation);
+  } catch (cleanupError) {
+    let attachedToPrimary = false;
+    if (generationFailed && generationError !== null) {
+      const kind = typeof generationError;
+      if (kind === 'object' || kind === 'function') {
+        try {
+          const errorWithCause = generationError as { cause?: unknown };
+          if (errorWithCause.cause === undefined) {
+            errorWithCause.cause = cleanupError;
+            attachedToPrimary = errorWithCause.cause === cleanupError;
+          }
+        } catch {
+          // Frozen/cross-realm throwables may reject mutation; warn below.
+        }
+      }
+    }
+
+    console.warn(
+      '[text-gen worker] LiteRT-LM conversation cleanup failed',
+      cleanupError,
+      attachedToPrimary ? '(attached to primary error)' : '(not attached to primary error)',
+    );
+  }
+
+  if (generationFailed) throw generationError;
+
+  // Cleanup settles before the terminal event so cancellation can still win
+  // during teardown, but cleanup failure cannot erase successful inference.
+  if (!cancelledGenerations.has(id)) {
+    emit({ type: 'complete', id });
+  }
+}
+
+async function generateMediaPipe(id: string, prompt: LiteRtLmWorkerPrompt): Promise<void> {
+  if (!mediaPipeEngine) throw new Error('MediaPipe LLM Inference is not loaded');
+  if (cancelledGenerations.has(id)) return;
+
+  mediaPipeGenerationIds.add(id);
+  try {
+    await mediaPipeEngine.generate(
+      prompt,
+      (text) => {
+        if (!cancelledGenerations.has(id) && text) {
+          emit({ type: 'token', id, text });
+        }
+      },
+      () => cancelledGenerations.has(id),
+    );
+    if (!cancelledGenerations.has(id)) {
+      emit({ type: 'complete', id });
+    }
+  } catch (error) {
+    // A caller-side abort already rejected the public promise and asked the
+    // engine to cancel. Do not turn that expected cancellation into a second
+    // worker error after the request has been abandoned.
+    if (!cancelledGenerations.has(id)) throw error;
+  } finally {
+    // Dispatcher owns cancelledGenerations so it can emit one terminal
+    // cancellation event before clearing request bookkeeping.
+    mediaPipeGenerationIds.delete(id);
   }
 }
 
@@ -142,34 +249,91 @@ async function disposeAllConversations(): Promise<void> {
   for (const [id, conversation] of activeConversations) {
     conversation.cancel();
     await conversation.delete();
+    activeConversations.delete(id);
   }
-  activeConversations.clear();
 }
 
-worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
-  const data = event.data;
+async function disposeLoadedEngine(): Promise<void> {
+  await disposeAllConversations();
+
+  if (liteRtLmEngine) {
+    await liteRtLmEngine.delete();
+    liteRtLmEngine = undefined;
+  }
+
+  if (mediaPipeEngine) {
+    mediaPipeEngine.dispose();
+    mediaPipeEngine = undefined;
+  }
+}
+
+async function loadEngine(data: Extract<LiteRtLmWorkerRequest, { type: 'load' }>): Promise<void> {
+  await disposeLoadedEngine();
+
+  activeEngine = data.options?.engine ?? 'litert-lm';
+  if (activeEngine === 'mediapipe') {
+    mediaPipeEngine = new MediaPipeMultimodalEngine();
+    await mediaPipeEngine.load(data.model, data.options?.mediaPipe);
+    return;
+  }
+
+  const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
+  liteRtLmEngine = await module.Engine.create({
+    model: data.model,
+    mainExecutorSettings: { maxNumTokens: 8192 },
+  });
+}
+
+function hasGenerationConfig(config?: LiteRtLmWorkerGenerationConfig): boolean {
+  return config !== undefined && Object.keys(config).length > 0;
+}
+
+function cancelGeneration(id: string): void {
+  // Ignore late/unknown cancels so cancellation bookkeeping cannot grow without
+  // a corresponding request that will eventually clean it up.
+  if (!knownGenerationIds.has(id)) return;
+
+  cancelledGenerations.add(id);
+  activeConversations.get(id)?.cancel();
+  if (mediaPipeGenerationIds.has(id)) {
+    mediaPipeEngine?.cancel();
+  }
+}
+
+async function dispatchRequest(data: Exclude<LiteRtLmWorkerRequest, { type: 'cancel' }>): Promise<void> {
   try {
     switch (data.type) {
       case 'load':
-        await disposeAllConversations();
-        await engine?.delete();
-        const module = (await import('@litert-lm/core')) as unknown as LiteRtLmModule;
-        engine = await module.Engine.create({
-          model: data.model,
-          mainExecutorSettings: { maxNumTokens: 8192 },
-        });
+        await loadEngine(data);
         emit({ type: 'ready' });
         break;
       case 'generate':
-        await generate(data.id, data.prompt, data.config);
-        break;
-      case 'cancel':
-        activeConversations.get(data.id)?.cancel();
+        try {
+          if (cancelledGenerations.has(data.id)) return;
+
+          if (activeEngine === 'mediapipe') {
+            if (hasGenerationConfig(data.config)) {
+              throw new Error(
+                'Per-generation config is not supported by the MediaPipe worker engine; set MediaPipe sampling/context options during load() instead',
+              );
+            }
+            await generateMediaPipe(data.id, data.prompt);
+          } else {
+            await generateLiteRtLm(data.id, data.prompt, data.config);
+          }
+        } catch (error) {
+          // Cancellation has its own terminal worker response. Suppress native
+          // cancellation errors here and let finally emit the cancelled event.
+          if (!cancelledGenerations.has(data.id)) throw error;
+        } finally {
+          const wasCancelled = cancelledGenerations.has(data.id);
+          knownGenerationIds.delete(data.id);
+          cancelledGenerations.delete(data.id);
+          if (wasCancelled) emit({ type: 'cancelled', id: data.id });
+        }
         break;
       case 'dispose':
-        await disposeAllConversations();
-        await engine?.delete();
-        engine = undefined;
+        await disposeLoadedEngine();
         emit({ type: 'disposed' });
         break;
     }
@@ -180,4 +344,33 @@ worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
       message: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+worker.onmessage = (event: MessageEvent<LiteRtLmWorkerRequest>) => {
+  const data = event.data;
+
+  // Cancellation is deliberately outside the serialized dispatch queue so an
+  // active decode can be interrupted immediately.
+  if (data.type === 'cancel') {
+    cancelGeneration(data.id);
+    return;
+  }
+
+  if (data.type === 'dispose') {
+    // Teardown itself remains serialized, but interrupt native work now so the
+    // queued dispose is not forced to wait for an abandoned generation.
+    for (const id of knownGenerationIds) cancelGeneration(id);
+  }
+
+  if (data.type === 'generate') {
+    knownGenerationIds.add(data.id);
+  }
+
+  const task = dispatchQueue
+    .catch(() => undefined)
+    .then(() => dispatchRequest(data));
+  dispatchQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
 };

@@ -514,6 +514,9 @@ importers:
       '@litert-lm/core':
         specifier: ^0.15.0
         version: 0.15.0
+      '@mediapipe/tasks-genai':
+        specifier: 0.10.29
+        version: 0.10.29
     devDependencies:
       '@litert-playground/inference-core':
         specifier: workspace:*
@@ -902,6 +905,9 @@ packages:
 
   '@litertjs/wasm-utils@2.5.3':
     resolution: {integrity: sha512-4fJiw6tBQnIs+0jH/OQ16nYOiSl8/+zZnn5h2ul8aTKHi05sVqZW580Tmk78pC2kT39A9OYBVdFawteZ/sI1kQ==}
+
+  '@mediapipe/tasks-genai@0.10.29':
+    resolution: {integrity: sha512-PRznwHOprGNoSbTbtAyHkMD1rslPLEBSidvz/Ga7qWVr86CXmPEcQpFCidLciBpWNKF8VhQMU2YA51YyBCbPKg==}
 
   '@mingcute/icons@3.0.2':
     resolution: {integrity: sha512-NuDZuZy0B/MmrdoVVOodOURS1qPqgcdSHFPKSG9gPEF6/dr0+zm5pfJs0U7Yta5jjoCdX0WZcVbZOov2tMMPTA==}
@@ -2104,6 +2110,8 @@ snapshots:
       '@litertjs/wasm-utils': 2.5.3
 
   '@litertjs/wasm-utils@2.5.3': {}
+
+  '@mediapipe/tasks-genai@0.10.29': {}
 
   '@mingcute/icons@3.0.2': {}
 
