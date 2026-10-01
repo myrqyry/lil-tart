@@ -35,7 +35,11 @@ export interface LiteRtLmWorkerLoadOptions {
 export type LiteRtLmWorkerPromptPart =
   | { type: 'text'; text: string }
   | { type: 'image'; data: Blob }
-  | { type: 'audio'; data: Blob };
+  | {
+      type: 'audio';
+      audioSamples: Float32Array;
+      audioSampleRateHz: number;
+    };
 
 export type LiteRtLmWorkerPrompt = string | LiteRtLmWorkerPromptPart[];
 

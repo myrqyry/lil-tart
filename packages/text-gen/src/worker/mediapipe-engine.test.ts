@@ -83,42 +83,40 @@ describe('MediaPipeMultimodalEngine', () => {
     expect(options?.baseOptions?.modelAssetPath).toBeUndefined();
   });
 
-  it('converts image/audio Blobs to scoped object URLs and revokes them', async () => {
+  it('decodes image Blobs and forwards worker-safe PCM audio chunks', async () => {
     const fake = createFakeMediaPipe();
-    const createObjectURL = vi
-      .fn<(blob: Blob) => string>()
-      .mockReturnValueOnce('blob:image')
-      .mockReturnValueOnce('blob:audio');
-    const revokeObjectURL = vi.fn();
+    const closeBitmap = vi.fn();
+    const bitmap = { width: 1, height: 1, close: closeBitmap } as unknown as ImageBitmap;
+    const decodeImage = vi.fn().mockResolvedValue(bitmap);
     const engine = new MediaPipeMultimodalEngine({
       loadModule: async () => fake.module,
-      createObjectURL,
-      revokeObjectURL,
+      decodeImage,
     });
     await engine.load('model.task', { maxNumImages: 1, supportAudio: true });
 
     const chunks: string[] = [];
+    const audioSamples = new Float32Array([0.25, -0.25]);
     const result = await engine.generate(
       [
         { type: 'text', text: 'Describe this.' },
         { type: 'image', data: new Blob(['image']) },
-        { type: 'audio', data: new Blob(['audio']) },
+        { type: 'audio', audioSamples, audioSampleRateHz: 16_000 },
       ],
       (text) => chunks.push(text),
     );
 
     expect(result).toBe('hello');
     expect(chunks).toEqual(['hel', 'lo']);
+    expect(decodeImage).toHaveBeenCalledTimes(1);
     expect(fake.generateResponse).toHaveBeenCalledWith(
       [
         'Describe this.',
-        { imageSource: 'blob:image' },
-        { audioSource: 'blob:audio' },
+        { imageSource: bitmap },
+        { audioSource: { audioSamples, audioSampleRateHz: 16_000 } },
       ],
       expect.any(Function),
     );
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:image');
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:audio');
+    expect(closeBitmap).toHaveBeenCalledTimes(1);
 
     engine.dispose();
     expect(fake.close).toHaveBeenCalledTimes(1);
@@ -136,20 +134,20 @@ describe('MediaPipeMultimodalEngine', () => {
     expect(fake.cancelProcessing).toHaveBeenCalledTimes(1);
   });
 
-  it('revokes media URLs when generation fails', async () => {
+  it('closes decoded image resources when generation fails', async () => {
     const fake = createFakeMediaPipe();
     fake.generateResponse.mockRejectedValueOnce(new Error('generation failed'));
-    const revokeObjectURL = vi.fn();
+    const closeBitmap = vi.fn();
+    const bitmap = { width: 1, height: 1, close: closeBitmap } as unknown as ImageBitmap;
     const engine = new MediaPipeMultimodalEngine({
       loadModule: async () => fake.module,
-      createObjectURL: () => 'blob:image',
-      revokeObjectURL,
+      decodeImage: async () => bitmap,
     });
     await engine.load('model.task', { maxNumImages: 1 });
 
     await expect(
       engine.generate([{ type: 'image', data: new Blob(['image']) }], vi.fn()),
     ).rejects.toThrow('generation failed');
-    expect(revokeObjectURL).toHaveBeenCalledWith('blob:image');
+    expect(closeBitmap).toHaveBeenCalledTimes(1);
   });
 });

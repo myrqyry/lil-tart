@@ -192,8 +192,10 @@ The development command starts Lil Tart from `apps/playground`.
 ### MediaPipe worker engine
 
 `@litert-playground/text-gen` also exposes a shared worker surface with an
-explicit `mediapipe` engine for structured text/image/audio prompts. The
-worker's `advertisedEngines` list is a build-time statement only; consumers
+explicit `mediapipe` engine for structured text/image/audio prompts. Image
+Blobs are decoded to worker-native `ImageBitmap` sources; audio crosses the
+worker boundary as PCM `Float32Array` samples plus an explicit sample rate.
+The worker's `advertisedEngines` list is a build-time statement only; consumers
 must treat a successful `load()` as the runtime availability check for the
 chosen browser, model, WebGPU environment, and host policy.
 

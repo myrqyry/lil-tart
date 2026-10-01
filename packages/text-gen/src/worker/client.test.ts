@@ -132,12 +132,14 @@ describe('LiteRtLmWorkerClient', () => {
     const worker = new FakeWorker();
     const client = new LiteRtLmWorkerClient(() => worker);
     const image = new Blob(['image']);
+    const audioSamples = new Float32Array([0.1, -0.1]);
     const tokens: string[] = [];
 
     const generating = client.generate(
       [
         { type: 'text', text: 'Look.' },
         { type: 'image', data: image },
+        { type: 'audio', audioSamples, audioSampleRateHz: 16_000 },
       ],
       (text) => tokens.push(text),
     );
@@ -149,6 +151,7 @@ describe('LiteRtLmWorkerClient', () => {
       prompt: [
         { type: 'text', text: 'Look.' },
         { type: 'image', data: image },
+        { type: 'audio', audioSamples, audioSampleRateHz: 16_000 },
       ],
     });
 

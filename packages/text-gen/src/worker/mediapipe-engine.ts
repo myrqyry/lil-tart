@@ -24,8 +24,7 @@ interface MediaPipeInferenceLike {
 
 interface MediaPipeEngineDeps {
   loadModule?: () => Promise<MediaPipeModule>;
-  createObjectURL?: (blob: Blob) => string;
-  revokeObjectURL?: (url: string) => void;
+  decodeImage?: (blob: Blob) => Promise<ImageBitmap>;
 }
 
 interface PreparedPrompt {
@@ -36,13 +35,11 @@ interface PreparedPrompt {
 export class MediaPipeMultimodalEngine {
   private inference: MediaPipeInferenceLike | null = null;
   private readonly loadModule: () => Promise<MediaPipeModule>;
-  private readonly createObjectURL: (blob: Blob) => string;
-  private readonly revokeObjectURL: (url: string) => void;
+  private readonly decodeImage: (blob: Blob) => Promise<ImageBitmap>;
 
   constructor(deps: MediaPipeEngineDeps = {}) {
     this.loadModule = deps.loadModule ?? (() => import('@mediapipe/tasks-genai'));
-    this.createObjectURL = deps.createObjectURL ?? ((blob) => URL.createObjectURL(blob));
-    this.revokeObjectURL = deps.revokeObjectURL ?? ((url) => URL.revokeObjectURL(url));
+    this.decodeImage = deps.decodeImage ?? ((blob) => createImageBitmap(blob));
   }
 
   async load(
@@ -89,7 +86,7 @@ export class MediaPipeMultimodalEngine {
       throw new Error('MediaPipe LLM Inference is not loaded');
     }
 
-    const prepared = this.preparePrompt(prompt);
+    const prepared = await this.preparePrompt(prompt);
     let streamed = '';
 
     try {
@@ -121,33 +118,46 @@ export class MediaPipeMultimodalEngine {
     this.inference = null;
   }
 
-  private preparePrompt(prompt: LiteRtLmWorkerPrompt): PreparedPrompt {
+  private async preparePrompt(prompt: LiteRtLmWorkerPrompt): Promise<PreparedPrompt> {
     if (typeof prompt === 'string') {
       return { query: prompt, cleanup: () => undefined };
     }
 
-    const objectUrls: string[] = [];
-    const query = prompt.map((part) => {
-      if (part.type === 'text') return part.text;
+    const imageBitmaps: ImageBitmap[] = [];
+    const query: Array<string | { imageSource: ImageBitmap } | {
+      audioSource: { audioSamples: Float32Array; audioSampleRateHz: number };
+    }> = [];
 
-      // @mediapipe/tasks-genai 0.10.29 explicitly accepts string
-      // ImageSource/AudioSource values and dereferences them internally. A
-      // scoped object URL therefore preserves Blob streaming without another
-      // full media-buffer copy; cleanup happens after generateResponse settles.
-      const url = this.createObjectURL(part.data);
-      objectUrls.push(url);
+    try {
+      for (const part of prompt) {
+        if (part.type === 'text') {
+          query.push(part.text);
+          continue;
+        }
 
-      if (part.type === 'image') {
-        return { imageSource: url };
+        if (part.type === 'image') {
+          const bitmap = await this.decodeImage(part.data);
+          imageBitmaps.push(bitmap);
+          query.push({ imageSource: bitmap });
+          continue;
+        }
+
+        query.push({
+          audioSource: {
+            audioSamples: part.audioSamples,
+            audioSampleRateHz: part.audioSampleRateHz,
+          },
+        });
       }
-
-      return { audioSource: url };
-    }) as Prompt;
+    } catch (error) {
+      for (const bitmap of imageBitmaps) bitmap.close();
+      throw error;
+    }
 
     return {
-      query,
+      query: query as Prompt,
       cleanup: () => {
-        for (const url of objectUrls) this.revokeObjectURL(url);
+        for (const bitmap of imageBitmaps) bitmap.close();
       },
     };
   }
