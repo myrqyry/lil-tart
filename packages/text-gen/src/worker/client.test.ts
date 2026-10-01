@@ -236,6 +236,28 @@ describe('LiteRtLmWorkerClient', () => {
     expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
 
+  it('force-terminates when dispose acknowledgement never arrives', async () => {
+    vi.useFakeTimers();
+    try {
+      const worker = new FakeWorker();
+      const client = new LiteRtLmWorkerClient(() => worker);
+
+      client.dispose();
+      expect(worker.terminate).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(1_000);
+
+      expect(worker.terminate).toHaveBeenCalledTimes(1);
+      expect(worker.onmessage).toBeNull();
+      expect(worker.onerror).toBeNull();
+
+      worker.emit({ type: 'disposed' });
+      expect(worker.terminate).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('uses distinct disposal errors for independent pending generations', async () => {
     const worker = new FakeWorker();
     const client = new LiteRtLmWorkerClient(() => worker);
@@ -255,16 +277,6 @@ describe('LiteRtLmWorkerClient', () => {
 
     worker.emit({ type: 'disposed' });
     expect(worker.terminate).toHaveBeenCalledTimes(1);
-  });
-
-  it('maps a worker terminal cancellation to AbortError for direct protocol cancellation', async () => {
-    const worker = new FakeWorker();
-    const client = new LiteRtLmWorkerClient(() => worker);
-    const generating = client.generate('hello', vi.fn());
-
-    worker.emit({ type: 'cancelled', id: '1' });
-
-    await expect(generating).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('structured-clones multimodal prompt parts through the worker protocol', async () => {
@@ -319,5 +331,9 @@ describe('LiteRtLmWorkerClient', () => {
       type: 'cancel',
       id: '1',
     });
+
+    // Raw protocol consumers receive a cancelled terminal event; the bundled
+    // client has already settled from its AbortSignal and ignores this ack.
+    worker.emit({ type: 'cancelled', id: '1' });
   });
 });

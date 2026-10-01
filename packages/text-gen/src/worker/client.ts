@@ -283,14 +283,10 @@ export class LiteRtLmWorkerClient {
         }
         break;
       case 'cancelled':
-        {
-          const pending = this.pending.get(message.id);
-          if (pending) {
-            this.pending.delete(message.id);
-            pending.cleanup();
-            pending.reject(createAbortError());
-          }
-        }
+        // The raw worker protocol exposes a terminal cancellation event for
+        // direct consumers. This client settles AbortSignal cancellation
+        // immediately in generate(), so the worker acknowledgement is only
+        // informational here.
         break;
       case 'disposed':
         this.finishTermination();

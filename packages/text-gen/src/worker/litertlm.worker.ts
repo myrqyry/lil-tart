@@ -160,6 +160,7 @@ async function generateLiteRtLm(
   }
 
   activeConversations.set(id, conversation);
+  let generationFinished = false;
   try {
     await replayHistory(conversation, config?.history);
     await streamResponse(
@@ -171,11 +172,16 @@ async function generateLiteRtLm(
         if (text) emit({ type: 'token', id, text });
       },
     );
-    if (!cancelledGenerations.has(id)) {
-      emit({ type: 'complete', id });
-    }
+    generationFinished = true;
   } finally {
     await disposeConversation(id, conversation);
+  }
+
+  // Conversation teardown is part of the generation lifecycle. Emitting
+  // complete only after it settles prevents a cancel during delete() from
+  // producing both complete and cancelled terminal events.
+  if (generationFinished && !cancelledGenerations.has(id)) {
+    emit({ type: 'complete', id });
   }
 }
 

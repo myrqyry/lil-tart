@@ -205,7 +205,11 @@ stable `loadKey` in the worker load options to opt into safe deduplication;
 Lil Tart does not guess model identity from Blob size/MIME metadata.
 The worker's `advertisedEngines` list is a build-time statement only; consumers
 must treat a successful `load()` as the runtime availability check for the
-chosen browser, model, WebGPU environment, and host policy.
+chosen browser, model, WebGPU environment, and host policy. Direct worker
+protocol consumers receive a terminal `cancelled` response. The bundled
+`LiteRtLmWorkerClient` instead rejects its own `AbortSignal` immediately and
+treats the later worker cancellation acknowledgement as informational, so
+caller abort latency does not depend on native worker teardown.
 
 By default, the MediaPipe engine resolves its pinned `@mediapipe/tasks-genai`
 WASM files from jsDelivr. Offline, air-gapped, or strict-CSP consumers should

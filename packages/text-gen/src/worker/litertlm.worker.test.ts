@@ -188,6 +188,37 @@ describe('LiteRT-LM worker dispatch', () => {
     expect(liteRt.conversationCancel).not.toHaveBeenCalled();
   });
 
+  it('emits only cancelled when cancellation lands during LiteRT conversation deletion', async () => {
+    const { scope, messages } = await bootWorker();
+    send(scope, { type: 'load', model: 'model.litertlm' });
+    await flushWorker();
+
+    let releaseDelete!: () => void;
+    liteRt.conversationDelete.mockImplementationOnce(
+      () => new Promise<void>((resolve) => {
+        releaseDelete = resolve;
+      }),
+    );
+
+    send(scope, { type: 'generate', id: 'cleanup-race', prompt: 'hello' });
+    await flushWorker();
+
+    expect(liteRt.conversationDelete).toHaveBeenCalledTimes(1);
+    expect(messages).not.toContainEqual({ type: 'complete', id: 'cleanup-race' });
+
+    send(scope, { type: 'cancel', id: 'cleanup-race' });
+    releaseDelete();
+    await flushWorker();
+
+    const terminal = messages.filter(
+      (message) =>
+        'id' in message &&
+        message.id === 'cleanup-race' &&
+        (message.type === 'complete' || message.type === 'cancelled'),
+    );
+    expect(terminal).toEqual([{ type: 'cancelled', id: 'cleanup-race' }]);
+  });
+
   it('cancels active LiteRT-LM generation before serialized dispose tears down the engine', async () => {
     const { scope, messages } = await bootWorker();
     send(scope, { type: 'load', model: 'model.litertlm' });
