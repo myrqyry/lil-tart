@@ -127,17 +127,23 @@ describe('MediaPipeMultimodalEngine', () => {
     const closeBitmap = vi.fn()
     const bitmap = { width: 1, height: 1, close: closeBitmap } as unknown as ImageBitmap
     let releaseDecode!: () => void
-    const engine = new MediaPipeMultimodalEngine({
-      loadModule: async () => fake.module,
-      decodeImage: () => new Promise<ImageBitmap>((resolve) => {
+    const decodeImage = vi.fn(
+      () => new Promise<ImageBitmap>((resolve) => {
         releaseDecode = () => resolve(bitmap)
       }),
+    )
+    const engine = new MediaPipeMultimodalEngine({
+      loadModule: async () => fake.module,
+      decodeImage,
     })
-    await engine.load('model.task', { maxNumImages: 1 })
+    await engine.load('model.task', { maxNumImages: 2 })
 
     let cancelled = false
     const running = engine.generate(
-      [{ type: 'image', data: new Blob(['image']) }],
+      [
+        { type: 'image', data: new Blob(['image-1']) },
+        { type: 'image', data: new Blob(['image-2']) },
+      ],
       vi.fn(),
       () => cancelled,
     )
@@ -147,6 +153,7 @@ describe('MediaPipeMultimodalEngine', () => {
 
     await expect(running).resolves.toBe('')
     expect(fake.generateResponse).not.toHaveBeenCalled()
+    expect(decodeImage).toHaveBeenCalledTimes(1)
     expect(closeBitmap).toHaveBeenCalledTimes(1)
   })
 

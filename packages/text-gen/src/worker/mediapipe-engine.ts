@@ -87,13 +87,13 @@ export class MediaPipeMultimodalEngine {
       throw new Error('MediaPipe LLM Inference is not loaded');
     }
 
-    const prepared = await this.preparePrompt(prompt);
-    let streamed = '';
+    const prepared = await this.preparePrompt(prompt, shouldCancel);
+    if (!prepared) return '';
 
+    let streamed = '';
     try {
-      // Image decoding is asynchronous. Cancellation can arrive while
-      // createImageBitmap() is still running, before MediaPipe itself has any
-      // native work to cancel.
+      // Cancellation can still land in the tiny handoff window after prompt
+      // preparation completes and before native inference starts.
       if (shouldCancel?.()) return '';
 
       const response = await this.inference.generateResponse(
@@ -124,18 +124,29 @@ export class MediaPipeMultimodalEngine {
     this.inference = null;
   }
 
-  private async preparePrompt(prompt: LiteRtLmWorkerPrompt): Promise<PreparedPrompt> {
+  private async preparePrompt(
+    prompt: LiteRtLmWorkerPrompt,
+    shouldCancel?: () => boolean,
+  ): Promise<PreparedPrompt | null> {
     if (typeof prompt === 'string') {
-      return { query: prompt, cleanup: () => undefined };
+      return shouldCancel?.() ? null : { query: prompt, cleanup: () => undefined };
     }
 
     const imageBitmaps: ImageBitmap[] = [];
     const query: Array<string | { imageSource: ImageBitmap } | {
       audioSource: { audioSamples: Float32Array; audioSampleRateHz: number };
     }> = [];
+    const closeImages = () => {
+      for (const bitmap of imageBitmaps) bitmap.close();
+    };
 
     try {
       for (const part of prompt) {
+        if (shouldCancel?.()) {
+          closeImages();
+          return null;
+        }
+
         if (part.type === 'text') {
           query.push(part.text);
           continue;
@@ -143,6 +154,11 @@ export class MediaPipeMultimodalEngine {
 
         if (part.type === 'image') {
           const bitmap = await this.decodeImage(part.data);
+          if (shouldCancel?.()) {
+            bitmap.close();
+            closeImages();
+            return null;
+          }
           imageBitmaps.push(bitmap);
           query.push({ imageSource: bitmap });
           continue;
@@ -156,15 +172,13 @@ export class MediaPipeMultimodalEngine {
         });
       }
     } catch (error) {
-      for (const bitmap of imageBitmaps) bitmap.close();
+      closeImages();
       throw error;
     }
 
     return {
       query: query as Prompt,
-      cleanup: () => {
-        for (const bitmap of imageBitmaps) bitmap.close();
-      },
+      cleanup: closeImages,
     };
   }
 }
