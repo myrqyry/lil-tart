@@ -146,6 +146,7 @@ describe('LiteRT-LM worker dispatch', () => {
     expect(mediaPipe.dispose).toHaveBeenCalledTimes(1);
     expect(mediaPipe.load).toHaveBeenCalledTimes(2);
     expect(messages).not.toContainEqual({ type: 'complete', id: 'active' });
+    expect(messages).toContainEqual({ type: 'cancelled', id: 'active' });
     expect(messages.filter((message) => message.type === 'ready')).toHaveLength(2);
   });
 
@@ -179,6 +180,7 @@ describe('LiteRT-LM worker dispatch', () => {
     expect(liteRt.conversationDelete).toHaveBeenCalledTimes(1);
     expect(liteRt.sendMessageStreaming).not.toHaveBeenCalled();
     expect(messages).not.toContainEqual({ type: 'complete', id: 'litert-pending' });
+    expect(messages).toContainEqual({ type: 'cancelled', id: 'litert-pending' });
 
     // The generation's finally block must clear bookkeeping: a late cancel for
     // the same id is ignored rather than resurrecting cancellation state.
@@ -212,6 +214,7 @@ describe('LiteRT-LM worker dispatch', () => {
 
     expect(liteRt.conversationDelete).toHaveBeenCalledTimes(1);
     expect(liteRt.engineDelete).toHaveBeenCalledTimes(1);
+    expect(messages).toContainEqual({ type: 'cancelled', id: 'litert-active' });
     expect(messages).toContainEqual({ type: 'disposed' });
     expect(messages).not.toContainEqual({ type: 'complete', id: 'litert-active' });
 

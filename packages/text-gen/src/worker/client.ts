@@ -31,38 +31,71 @@ interface ActiveLoadRequest {
   options?: LiteRtLmWorkerLoadOptions;
 }
 
-function canonicalValue(value: unknown): unknown {
-  if (value === undefined) return ['undefined'];
-  if (value === null) return ['null'];
+interface CanonicalResult {
+  ok: boolean;
+  value?: unknown;
+}
+
+function canonicalValue(value: unknown): CanonicalResult {
+  if (value === undefined) return { ok: true, value: undefined };
+  if (value === null) return { ok: true, value: null };
 
   switch (typeof value) {
     case 'string':
     case 'number':
     case 'boolean':
-      return [typeof value, value];
-    case 'object':
+      return { ok: true, value };
+    case 'object': {
       if (Array.isArray(value)) {
-        return ['array', value.map((item) => canonicalValue(item))];
+        const items: unknown[] = [];
+        for (const item of value) {
+          const normalized = canonicalValue(item);
+          if (!normalized.ok) return { ok: false };
+          items.push(normalized.value);
+        }
+        return { ok: true, value: items };
       }
-      return [
-        'object',
-        Object.keys(value as Record<string, unknown>)
-          .sort()
-          .map((key) => [
-            key,
-            canonicalValue((value as Record<string, unknown>)[key]),
-          ]),
-      ];
+
+      const entries: Record<string, unknown> = {};
+      for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+        const normalized = canonicalValue((value as Record<string, unknown>)[key]);
+        if (!normalized.ok) return { ok: false };
+        if (normalized.value !== undefined) entries[key] = normalized.value;
+      }
+      return { ok: true, value: entries };
+    }
     default:
-      throw new Error(`Unsupported worker load option type: ${typeof value}`);
+      // Exotic values are not part of the typed public contract. Under an
+      // untyped JS caller, degrade to "cannot prove identical" rather than
+      // throwing a validation error only when a second load happens to race.
+      return { ok: false };
   }
 }
 
-function loadOptionsKey(options?: LiteRtLmWorkerLoadOptions): string {
-  // Canonicalize the complete public options object rather than transcribing
-  // today's fields. New options therefore participate in load identity
-  // automatically, and explicit empty objects remain distinct from omission.
-  return JSON.stringify(canonicalValue(options));
+function loadOptionsKey(options?: LiteRtLmWorkerLoadOptions): string | null {
+  const engine = options?.engine ?? 'litert-lm';
+  const semanticOptions: Record<string, unknown> = {
+    ...(options as Record<string, unknown> | undefined),
+    engine,
+  };
+
+  // loadKey identifies model bytes and is handled separately.
+  delete semanticOptions.loadKey;
+
+  // The worker ignores MediaPipe options unless that engine is selected.
+  if (engine !== 'mediapipe') {
+    delete semanticOptions.mediaPipe;
+  } else if (options?.mediaPipe) {
+    const hasMeaningfulMediaPipeOption = Object.values(options.mediaPipe)
+      .some((value) => value !== undefined);
+    if (!hasMeaningfulMediaPipeOption) delete semanticOptions.mediaPipe;
+  }
+
+  // Canonicalization drops undefined object values recursively, so omitted
+  // defaults and explicit undefined describe the same worker behavior while
+  // future public fields automatically participate in identity.
+  const canonical = canonicalValue(semanticOptions);
+  return canonical.ok ? JSON.stringify(canonical.value) : null;
 }
 
 function sameModelIdentity(
@@ -86,8 +119,11 @@ function sameLoadRequest(
   model: string | Blob,
   options?: LiteRtLmWorkerLoadOptions,
 ): boolean {
-  return sameModelIdentity(left, model, options)
-    && loadOptionsKey(left.options) === loadOptionsKey(options);
+  if (!sameModelIdentity(left, model, options)) return false;
+
+  const leftKey = loadOptionsKey(left.options);
+  const rightKey = loadOptionsKey(options);
+  return leftKey !== null && rightKey !== null && leftKey === rightKey;
 }
 
 function createAbortError(): DOMException {
@@ -109,6 +145,8 @@ export class LiteRtLmWorkerClient {
   private pending = new Map<string, PendingGeneration>();
   private nextId = 0;
   private disposed = false;
+  private terminationTimer: ReturnType<typeof setTimeout> | null = null;
+  private terminated = false;
 
   constructor(createWorker: () => WorkerLike = () => new Worker(new URL('./litertlm.worker.ts', import.meta.url), { type: 'module' })) {
     this.worker = createWorker();
@@ -183,7 +221,10 @@ export class LiteRtLmWorkerClient {
     this.loadRequest = null;
 
     this.worker.postMessage({ type: 'dispose' });
-    this.worker.terminate();
+    // Give the worker a bounded opportunity to cancel/delete native resources
+    // before termination. The public API stays synchronous; local callers are
+    // rejected immediately while teardown completes in the worker.
+    this.terminationTimer = setTimeout(() => this.finishTermination(), 1_000);
 
     for (const [id, pending] of this.pending) {
       pending.cleanup();
@@ -241,9 +282,32 @@ export class LiteRtLmWorkerClient {
           }
         }
         break;
+      case 'cancelled':
+        {
+          const pending = this.pending.get(message.id);
+          if (pending) {
+            this.pending.delete(message.id);
+            pending.cleanup();
+            pending.reject(createAbortError());
+          }
+        }
+        break;
       case 'disposed':
+        this.finishTermination();
         break;
     }
+  }
+
+  private finishTermination(): void {
+    if (this.terminated) return;
+    this.terminated = true;
+    if (this.terminationTimer) {
+      clearTimeout(this.terminationTimer);
+      this.terminationTimer = null;
+    }
+    this.worker.terminate();
+    this.worker.onmessage = null;
+    this.worker.onerror = null;
   }
 
   private handleError(event: ErrorEvent): void {
@@ -257,5 +321,6 @@ export class LiteRtLmWorkerClient {
       pending.reject(new Error(event.message));
     }
     this.pending.clear();
+    if (this.disposed) this.finishTermination();
   }
 }

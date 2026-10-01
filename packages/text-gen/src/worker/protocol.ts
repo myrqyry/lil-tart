@@ -70,5 +70,6 @@ export type LiteRtLmWorkerResponse =
   | { type: 'token'; id: string; text: string }
   | { type: 'reasoning'; id: string; text: string }
   | { type: 'complete'; id: string }
+  | { type: 'cancelled'; id: string }
   | { type: 'error'; id?: string; message: string }
   | { type: 'disposed' };

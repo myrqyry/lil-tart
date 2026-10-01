@@ -85,6 +85,31 @@ describe('LiteRtLmWorkerClient', () => {
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
   });
 
+  it('normalizes omitted defaults and undefined MediaPipe fields for load dedupe', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+
+    const first = client.load('model.litertlm');
+    const second = client.load('model.litertlm', { engine: 'litert-lm' });
+
+    expect(worker.messages).toHaveLength(1);
+    worker.emit({ type: 'ready' });
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+
+    const third = client.load('model.task', {
+      engine: 'mediapipe',
+      mediaPipe: {},
+    });
+    const fourth = client.load('model.task', {
+      engine: 'mediapipe',
+      mediaPipe: { temperature: undefined },
+    });
+
+    expect(worker.messages).toHaveLength(2);
+    worker.emit({ type: 'ready' });
+    await expect(Promise.all([third, fourth])).resolves.toEqual([undefined, undefined]);
+  });
+
   it('deduplicates distinct Blob objects only when the caller supplies the same loadKey', async () => {
     const worker = new FakeWorker();
     const client = new LiteRtLmWorkerClient(() => worker);
@@ -93,6 +118,24 @@ describe('LiteRtLmWorkerClient', () => {
 
     const first = client.load(firstBlob, { engine: 'mediapipe', loadKey: 'cached:model:v1' });
     const second = client.load(secondBlob, { engine: 'mediapipe', loadKey: 'cached:model:v1' });
+
+    expect(worker.messages).toHaveLength(1);
+    worker.emit({ type: 'ready' });
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it('normalizes caller-owned Blob loadKey whitespace for dedupe identity', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+
+    const first = client.load(new Blob(['model']), {
+      engine: 'mediapipe',
+      loadKey: 'cached:model:v1',
+    });
+    const second = client.load(new Blob(['model']), {
+      engine: 'mediapipe',
+      loadKey: ' cached:model:v1 ',
+    });
 
     expect(worker.messages).toHaveLength(1);
     worker.emit({ type: 'ready' });
@@ -145,6 +188,26 @@ describe('LiteRtLmWorkerClient', () => {
     await first;
   });
 
+  it('degrades exotic untyped load options to a normal conflict instead of throwing from keying', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+    const model = new Blob(['model']);
+
+    const first = client.load(model, {
+      engine: 'mediapipe',
+      mediaPipe: { temperature: (() => 0.5) as unknown as number },
+    });
+    await expect(
+      client.load(model, {
+        engine: 'mediapipe',
+        mediaPipe: { temperature: (() => 0.5) as unknown as number },
+      }),
+    ).rejects.toThrow('different worker model or engine is already loading');
+
+    worker.emit({ type: 'ready' });
+    await first;
+  });
+
   it('rejects a conflicting concurrent load instead of pretending the first model satisfies it', async () => {
     const worker = new FakeWorker();
     const client = new LiteRtLmWorkerClient(() => worker);
@@ -166,8 +229,11 @@ describe('LiteRtLmWorkerClient', () => {
 
     await expect(client.load('model.task')).rejects.toThrow('worker client is disposed');
     await expect(client.generate('hello', vi.fn())).rejects.toThrow('worker client is disposed');
-    expect(worker.terminate).toHaveBeenCalledTimes(1);
+    expect(worker.terminate).not.toHaveBeenCalled();
     expect(worker.messages).toEqual([{ type: 'dispose' }]);
+
+    worker.emit({ type: 'disposed' });
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
   });
 
   it('uses distinct disposal errors for independent pending generations', async () => {
@@ -186,6 +252,19 @@ describe('LiteRtLmWorkerClient', () => {
       expect(firstResult.reason.message).toContain('generation 1');
       expect(secondResult.reason.message).toContain('generation 2');
     }
+
+    worker.emit({ type: 'disposed' });
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+  });
+
+  it('maps a worker terminal cancellation to AbortError for direct protocol cancellation', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+    const generating = client.generate('hello', vi.fn());
+
+    worker.emit({ type: 'cancelled', id: '1' });
+
+    await expect(generating).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('structured-clones multimodal prompt parts through the worker protocol', async () => {

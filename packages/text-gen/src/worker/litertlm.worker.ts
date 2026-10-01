@@ -181,10 +181,7 @@ async function generateLiteRtLm(
 
 async function generateMediaPipe(id: string, prompt: LiteRtLmWorkerPrompt): Promise<void> {
   if (!mediaPipeEngine) throw new Error('MediaPipe LLM Inference is not loaded');
-  if (cancelledGenerations.has(id)) {
-    cancelledGenerations.delete(id);
-    return;
-  }
+  if (cancelledGenerations.has(id)) return;
 
   mediaPipeGenerationIds.add(id);
   try {
@@ -206,8 +203,9 @@ async function generateMediaPipe(id: string, prompt: LiteRtLmWorkerPrompt): Prom
     // worker error after the request has been abandoned.
     if (!cancelledGenerations.has(id)) throw error;
   } finally {
+    // Dispatcher owns cancelledGenerations so it can emit one terminal
+    // cancellation event before clearing request bookkeeping.
     mediaPipeGenerationIds.delete(id);
-    cancelledGenerations.delete(id);
   }
 }
 
@@ -288,12 +286,14 @@ async function dispatchRequest(data: Exclude<LiteRtLmWorkerRequest, { type: 'can
             await generateLiteRtLm(data.id, data.prompt, data.config);
           }
         } catch (error) {
-          // Caller-triggered abort has already rejected the public client
-          // promise. Do not emit a second failure for the same request.
+          // Cancellation has its own terminal worker response. Suppress native
+          // cancellation errors here and let finally emit the cancelled event.
           if (!cancelledGenerations.has(data.id)) throw error;
         } finally {
+          const wasCancelled = cancelledGenerations.has(data.id);
           knownGenerationIds.delete(data.id);
           cancelledGenerations.delete(data.id);
+          if (wasCancelled) emit({ type: 'cancelled', id: data.id });
         }
         break;
       case 'dispose':
