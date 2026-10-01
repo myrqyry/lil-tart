@@ -88,7 +88,10 @@ export interface LiteRtLmTextConfig extends TextGenerationConfig {
 }
 
 const DEFAULTS = {
-  model: 'litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm',
+  // The streaming LiteRT-LM path cannot Web-Crypto-hash a multi-hundred-MB
+  // checkpoint without buffering it first, so the immutable manifest revision
+  // is the active runtime provenance guarantee here.
+  model: litertLmManifest.assets[0].path,
   maxContextTokens: 4096,
   maxOutputTokens: TEXT_GENERATION_DEFAULTS.maxTokens,
 } satisfies Pick<LiteRtLmTextConfig, 'model' | 'maxContextTokens' | 'maxOutputTokens'>;

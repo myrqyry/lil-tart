@@ -37,6 +37,7 @@
     "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
+    "@litert-playground/qwen3-tts": "workspace:*",
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",

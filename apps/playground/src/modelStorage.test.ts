@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { ModelManifest } from '@litert-playground/inference-core'
 import {
   createModelLibraryAssetResolver,
   registerModelAssets,
@@ -19,6 +20,7 @@ interface FakeEntry {
   base?: string
   path?: string
   body?: ArrayBuffer
+  readError?: Error
 }
 
 // One shared store, so deletions persist across open() calls the way real
@@ -39,7 +41,7 @@ function cache() {
     match: async (request: Request) => {
       const entry = store.get(request.url)
       if (!entry) return undefined
-      return new Response(entry.body ?? new Uint8Array(entry.bytes), {
+      const response = new Response(entry.body ?? new Uint8Array(entry.bytes), {
         headers: {
           'x-lil-tart-bytes': String(entry.bytes),
           'x-lil-tart-asset-url': entry.assetUrl,
@@ -47,6 +49,12 @@ function cache() {
           ...(entry.path ? { 'x-lil-tart-asset-path': entry.path } : {}),
         },
       })
+      if (entry.readError) {
+        Object.defineProperty(response, 'arrayBuffer', {
+          value: vi.fn().mockRejectedValue(entry.readError),
+        })
+      }
+      return response
     },
     put: async (request: Request, response: Response) => {
       const body = await response.arrayBuffer()
@@ -375,6 +383,94 @@ describe('resolved asset membership', () => {
   })
 })
 
+
+describe('integrity-aware model library resolver', () => {
+  const asset = { id: 'model', path: 'verified/model.bin' }
+  const modelId = 'verified-model'
+  const assetUrl = `${HF}${asset.path}`
+  const manifest: ModelManifest = {
+    modelId,
+    name: 'Verified model',
+    version: '1',
+    capabilities: ['text-generation'],
+    backends: { wasm: true },
+    memory: { downloadBytes: 3, residentBytes: 3 },
+    assets: [{
+      ...asset,
+      bytes: 3,
+      sha256: '039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81',
+    }],
+  }
+
+  it('does not persist fresh bytes that fail integrity verification', async () => {
+    registerModelAssets(modelId, [asset.path])
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([9, 9, 9])),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const resolver = createModelLibraryAssetResolver(HF, { manifest })
+    await expect(resolver.resolve(asset)).rejects.toMatchObject({
+      code: 'ASSET_INTEGRITY_FAILED',
+      asset: 'model',
+    })
+
+    expect(store.size).toBe(0)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('evicts an unreadable cached body and recovers with fresh verified bytes', async () => {
+    registerModelAssets(modelId, [asset.path])
+    seed([{
+      url: cacheKeyUrl(modelId, assetUrl),
+      bytes: 3,
+      body: new Uint8Array([1, 2, 3]).buffer,
+      readError: new TypeError('cached body is unreadable'),
+      assetUrl,
+      base: HF,
+      path: asset.path,
+    }])
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3])),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const resolver = createModelLibraryAssetResolver(HF, { manifest })
+    const resolved = await resolver.resolve(asset)
+
+    expect(new Uint8Array(resolved)).toEqual(new Uint8Array([1, 2, 3]))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(store.size).toBe(1)
+    expect([...store.values()][0].readError).toBeUndefined()
+    expect(new Uint8Array([...store.values()][0].body!)).toEqual(new Uint8Array([1, 2, 3]))
+  })
+
+  it('evicts a poisoned cached asset and recovers with fresh verified bytes', async () => {
+    registerModelAssets(modelId, [asset.path])
+    seed([{
+      url: cacheKeyUrl(modelId, assetUrl),
+      bytes: 3,
+      body: new Uint8Array([9, 9, 9]).buffer,
+      assetUrl,
+      base: HF,
+      path: asset.path,
+    }])
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3])),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const resolver = createModelLibraryAssetResolver(HF, { manifest })
+    const resolved = await resolver.resolve(asset)
+
+    expect(new Uint8Array(resolved)).toEqual(new Uint8Array([1, 2, 3]))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(store.size).toBe(1)
+    expect(new Uint8Array([...store.values()][0].body!)).toEqual(new Uint8Array([1, 2, 3]))
+  })
+})
 
 describe('legacy cache safety and resolver metadata', () => {
   it.each([undefined, 'https://old.test/'])('retains unidentified legacy bytes (recorded base: %s)', async (base) => {

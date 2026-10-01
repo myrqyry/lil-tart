@@ -57,7 +57,9 @@ describe('minimal Qwen3-TTS extraction', () => {
     expect(source).not.toContain('assetBase: modelBase')
     expect(source).not.toMatch(/src\/App|registry|components\//)
     expect(viteConfig).toContain("const modelPrefix = '/models/qwen3-tts/'")
-    expect(viteConfig).toContain("const modelRepository = 'litert-community/Qwen3-TTS-12Hz-0.6B-Base'")
+    expect(viteConfig).toContain('QWEN3_TTS_UPSTREAM_REPOSITORY')
+    expect(viteConfig).toContain('QWEN3_TTS_UPSTREAM_REVISION')
+    expect(viteConfig).not.toContain('/resolve/main/')
     expect(viteConfig).toContain('Readable.fromWeb(response.body).pipe(res)')
     expect(readFileSync(new URL('./index.html', import.meta.url), 'utf8')).toContain('main.tsx')
     void createHttpAssetResolver

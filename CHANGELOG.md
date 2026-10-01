@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix(playground)`: replace 12 empty adapters (`sam2` ×2, `vision` ×10 including `6drepnet`, `blaze-face`, `yolox`, `u2net`, `edsr`, `migan`, `style-*`) with working `prepareInputs`/`parseOutputs` (`apps/playground/src/adapters/sam2.ts:16`, `apps/playground/src/adapters/vision.ts:70`)
 
 ### Fixed
+- `fix(inference-core, playground)`: bound streamed SHA-256 buffering before materialization; keep unknown-size capped streams streaming/unhashed; verify model-library bytes before persistence; self-heal unreadable or integrity-proven poisoned cache entries without swallowing unrelated verifier errors; keep strict published-asset hashing in dedicated Qwen workers; and make the playground graph set an explicit selector that defaults to published fp32 assets, derives its ids from the manifest definitions, and shows the required download size before loading.
+- Pin LiteRT-LM Hugging Face artifacts to immutable upstream revisions and record their published byte sizes and SHA-256 provenance instead of following mutable `main` paths; the text pipeline's built-in Qwen fallback now derives from that pinned manifest instead of retaining a separate mutable URL.
+- Enforce Qwen3-TTS manifest integrity on both direct and worker execution paths using exact-path provenance, preserve custom voices without invented demo-speaker hashes, keep the qualified Omni MTP's distinct integrity facts, pin the runnable example proxy to the same immutable upstream revision, and bound browser SHA-256 verification to 64 MiB while retaining byte-length checks for larger graphs.
 - `fix(text-gen)`: harden downstream LiteRT-LM lifecycle after review: validate and accumulate tool calls until clean stream completion, normalize runtime tool arguments, require renewable factories for caller-owned streams, reject explicit WebNN requests while preserving RuntimeContext fallback, reject concurrent loads before they can race native engine creation, prevent reload from orphaning an engine after cleanup failure, preserve completed inference and primary errors across cleanup failures, and keep the pipeline busy until conversation teardown settles.
 - `fix(tooling)`: pin the pnpm dev-engine to an exact 11.17.0 version so pnpm can validate and run the repository gate.
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: preserve caller-signal cancellation checks from `2200684` when combining late-result and disposal cleanup fixes
@@ -48,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fix`: terminate TTS workers on failure and probe WASM features honestly
 
 ### Verification
+- Lock the official Qwen3-TTS host-loop contract in regression coverage: 16 MTP passes per generated frame, 64-frame codec windows, and 25-frame left context after the first window.
 - Correct the `pipeline-load-cancellation` probe to call production `resolve()` with progress-triggered abort; its prior browser observation covered only the unused `stream()` entrypoint. Add real HTTP positive/negative checks and startup/cleanup regressions. Generate the fixture and open its server lazily, handle missing/read-failed assets, and check the actual Git ignore rule. Browser evidence for the corrected probe remains pending; see `docs/verification/2026-09-28-model-load-cancellation.md`
 
 ### Docs

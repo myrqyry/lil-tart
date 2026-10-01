@@ -1,14 +1,22 @@
 /// <reference lib="webworker" />
 import { createLiteRtRuntime } from '@litert-playground/runtime-litert';
-import { createCachingAssetResolver, createHttpAssetResolver } from '@litert-playground/inference-core';
+import {
+  createCachingAssetResolver,
+  createHttpAssetResolver,
+  createManifestVerifyingAssetResolver,
+  type ModelManifest,
+} from '@litert-playground/inference-core';
 import { DecoderPhase } from '../phases/decoder';
 import type { DecoderWorkerRequest, DecoderWorkerResponse } from './protocol';
 import { serializeError } from './protocol';
 
 let phase: DecoderPhase | undefined;
 
-async function buildContext(modelBase: string) {
-  const assets = createCachingAssetResolver(createHttpAssetResolver(modelBase));
+async function buildContext(modelBase: string, manifest: ModelManifest) {
+  const inner = createCachingAssetResolver(createHttpAssetResolver(modelBase));
+  // Dedicated workers keep strict SHA-256 verification. The 64 MiB
+  // whole-buffer ceiling is a main-thread playground safeguard only.
+  const assets = createManifestVerifyingAssetResolver(manifest, inner);
   return createLiteRtRuntime({ assets });
 }
 
@@ -16,8 +24,8 @@ self.onmessage = async (event: MessageEvent<DecoderWorkerRequest>) => {
   const req = event.data;
   try {
     if (req.type === 'initialize') {
-      const context = await buildContext(req.modelBase);
       phase = new DecoderPhase(req.variant);
+      const context = await buildContext(req.modelBase, phase.manifest);
       await phase.load(context);
       self.postMessage({ type: 'ready' } satisfies DecoderWorkerResponse);
       return;
