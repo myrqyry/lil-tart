@@ -48,6 +48,43 @@ describe('LiteRtLmWorkerClient', () => {
     await loading;
   });
 
+  it('allows a later load to switch models or worker engines', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+
+    const first = client.load('first.litertlm');
+    worker.emit({ type: 'ready' });
+    await first;
+
+    const second = client.load('second.task', {
+      engine: 'mediapipe',
+      mediaPipe: { maxNumImages: 1 },
+    });
+    expect(worker.messages[worker.messages.length - 1]).toEqual({
+      type: 'load',
+      model: 'second.task',
+      options: {
+        engine: 'mediapipe',
+        mediaPipe: { maxNumImages: 1 },
+      },
+    });
+
+    worker.emit({ type: 'ready' });
+    await second;
+  });
+
+  it('deduplicates only concurrent load callers', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+
+    const first = client.load('model.task', { engine: 'mediapipe' });
+    const second = client.load('model.task', { engine: 'mediapipe' });
+
+    expect(worker.messages).toHaveLength(1);
+    worker.emit({ type: 'ready' });
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
   it('structured-clones multimodal prompt parts through the worker protocol', async () => {
     const worker = new FakeWorker();
     const client = new LiteRtLmWorkerClient(() => worker);

@@ -18,6 +18,7 @@ interface MediaPipeInferenceLike {
     query: Prompt,
     progressListener?: (partialResult: string, done: boolean) => unknown,
   ): Promise<string>;
+  cancelProcessing(): void;
   close(): void;
 }
 
@@ -103,6 +104,16 @@ export class MediaPipeMultimodalEngine {
     } finally {
       prepared.cleanup();
     }
+  }
+
+  /**
+   * Ask MediaPipe to cancel the active decoding pass.
+   *
+   * Upstream 0.10.29 does not cancel initialization or prefilling yet, so callers
+   * must still treat cancellation as best-effort until decoding has started.
+   */
+  cancel(): void {
+    this.inference?.cancelProcessing();
   }
 
   dispose(): void {

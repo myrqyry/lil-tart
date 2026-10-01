@@ -187,6 +187,11 @@ async function generateMediaPipe(id: string, prompt: LiteRtLmWorkerPrompt): Prom
     if (!cancelledGenerations.has(id)) {
       emit({ type: 'complete', id });
     }
+  } catch (error) {
+    // A caller-side abort already rejected the public promise and asked the
+    // engine to cancel. Do not turn that expected cancellation into a second
+    // worker error after the request has been abandoned.
+    if (!cancelledGenerations.has(id)) throw error;
   } finally {
     mediaPipeGenerationIds.delete(id);
     cancelledGenerations.delete(id);
@@ -225,6 +230,7 @@ async function disposeLoadedEngine(): Promise<void> {
 
   if (mediaPipeEngine) {
     for (const id of mediaPipeGenerationIds) cancelledGenerations.add(id);
+    if (mediaPipeGenerationIds.size > 0) mediaPipeEngine.cancel();
     await mediaPipeQueue.catch(() => undefined);
     mediaPipeEngine.dispose();
     mediaPipeEngine = undefined;
@@ -266,6 +272,9 @@ worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
       case 'cancel':
         if (activeEngine === 'mediapipe') {
           cancelledGenerations.add(data.id);
+          if (mediaPipeGenerationIds.has(data.id)) {
+            mediaPipeEngine?.cancel();
+          }
         } else {
           activeConversations.get(data.id)?.cancel();
         }

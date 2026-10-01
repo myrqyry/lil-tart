@@ -57,11 +57,12 @@ export class LiteRtLmWorkerClient {
     });
     try {
       await this.loadPromise;
-    } catch (error) {
+    } finally {
+      // loadPromise only deduplicates callers while a load is in flight. Keeping
+      // a fulfilled promise here would make every later model/engine switch a
+      // silent no-op.
       this.loadPromise = null;
-      throw error;
     }
-    return this.loadPromise;
   }
 
   generate(
@@ -92,11 +93,16 @@ export class LiteRtLmWorkerClient {
   }
 
   dispose(): void {
+    const disposedError = new Error('LiteRT-LM worker disposed');
+    this.loadReject?.(disposedError);
+    this.loadResolve = null;
+    this.loadReject = null;
+    this.loadPromise = null;
     this.worker.postMessage({ type: 'dispose' });
     this.worker.terminate();
     for (const pending of this.pending.values()) {
       pending.cleanup();
-      pending.reject(new Error('LiteRT-LM worker disposed'));
+      pending.reject(disposedError);
     }
     this.pending.clear();
   }

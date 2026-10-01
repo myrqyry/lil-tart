@@ -12,8 +12,9 @@ function createFakeMediaPipe() {
       return 'hello';
     },
   );
+  const cancelProcessing = vi.fn();
   const close = vi.fn();
-  const inference = { generateResponse, close };
+  const inference = { generateResponse, cancelProcessing, close };
   const forGenAiTasks = vi.fn().mockResolvedValue({ wasmLoaderPath: 'fake' });
   const createFromOptions = vi.fn().mockResolvedValue(inference);
 
@@ -25,6 +26,7 @@ function createFakeMediaPipe() {
   return {
     module,
     generateResponse,
+    cancelProcessing,
     close,
     forGenAiTasks,
     createFromOptions,
@@ -120,6 +122,18 @@ describe('MediaPipeMultimodalEngine', () => {
 
     engine.dispose();
     expect(fake.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('delegates active decoding cancellation to MediaPipe', async () => {
+    const fake = createFakeMediaPipe();
+    const engine = new MediaPipeMultimodalEngine({
+      loadModule: async () => fake.module,
+    });
+    await engine.load('model.task');
+
+    engine.cancel();
+
+    expect(fake.cancelProcessing).toHaveBeenCalledTimes(1);
   });
 
   it('revokes media URLs when generation fails', async () => {
