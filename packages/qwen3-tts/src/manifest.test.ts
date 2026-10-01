@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { qwen3TtsManifest, createQwen3TtsManifest, qwen3TtsVariants } from './manifest'
 
+if (false) {
+  void qwen3TtsVariants.fp32
+  // @ts-expect-error Unknown variant keys must not be typed as present.
+  void qwen3TtsVariants['fp32 ']
+}
+
 describe('Qwen variants', () => {
   it('keeps artifact filenames in variant metadata', () => {
     const manifest = createQwen3TtsManifest(qwen3TtsVariants.int4)

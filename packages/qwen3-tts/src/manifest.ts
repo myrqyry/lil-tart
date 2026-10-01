@@ -92,10 +92,9 @@ const QWEN3_TTS_VARIANT_DEFINITIONS = {
 
 export type Qwen3TtsVariantId = keyof typeof QWEN3_TTS_VARIANT_DEFINITIONS
 
-// Keep the historical broad lookup surface for downstream callers while the
-// exact id union above lets first-party UIs fail at compile time if definitions
-// and labels drift apart.
-export const qwen3TtsVariants: Record<string, Qwen3TtsVariant> =
+// Preserve exact variant keys in the public surface so misspelled or stale
+// lookups fail at compile time instead of being typed as non-null variants.
+export const qwen3TtsVariants: Record<Qwen3TtsVariantId, Qwen3TtsVariant> =
   QWEN3_TTS_VARIANT_DEFINITIONS
 
 function publishedAsset(
