@@ -486,6 +486,35 @@ describe("LiteRtLmTextPipeline", () => {
     );
   });
 
+  it("rejects a concurrent load instead of racing two native engines", async () => {
+    let releaseEngine!: () => void;
+    const engineReady = new Promise<void>((resolve) => {
+      releaseEngine = resolve;
+    });
+    mockEngineCreate.mockImplementationOnce(async () => {
+      await engineReady;
+      return {
+        createConversation: mockCreateConversation,
+        delete: vi.fn(async () => undefined),
+      };
+    });
+
+    const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
+    const firstLoad = p.loadForBackend("wasm");
+
+    await vi.waitFor(() => expect(p.status).toBe("loading"));
+    await vi.waitFor(() => expect(mockEngineCreate).toHaveBeenCalledTimes(1));
+    await expect(p.loadForBackend("wasm")).rejects.toMatchObject({
+      code: "INFERENCE_FAILED",
+    });
+    expect(mockEngineCreate).toHaveBeenCalledTimes(1);
+
+    releaseEngine();
+    await expect(firstLoad).resolves.toBeUndefined();
+    expect(p.status).toBe("ready");
+    expect(mockEngineCreate).toHaveBeenCalledTimes(1);
+  });
+
   it("lets RuntimeContext WebNN degrade to the engine's supported backend selection", async () => {
     const p = new LiteRtLmTextPipeline(lfm2_5ThinkingManifest);
     await p.load({ ...fakeContext(), backend: "webnn" });

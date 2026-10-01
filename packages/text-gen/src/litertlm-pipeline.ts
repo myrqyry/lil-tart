@@ -366,6 +366,12 @@ export class LiteRtLmTextPipeline
     signal?: AbortSignal,
   ): Promise<void> {
     if (this.status === 'ready') return;
+    if (this.status === 'loading') {
+      throw new InferenceError(
+        'INFERENCE_FAILED',
+        'LiteRT-LM model loading is already in progress for this pipeline',
+      );
+    }
     if (this.disposed) {
       throw new InferenceError('CANCELLED', 'Pipeline was disposed and cannot load again');
     }
