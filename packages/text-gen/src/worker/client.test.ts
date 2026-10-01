@@ -85,6 +85,66 @@ describe('LiteRtLmWorkerClient', () => {
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
   });
 
+  it('deduplicates distinct Blob objects only when the caller supplies the same loadKey', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+    const firstBlob = new Blob([new Uint8Array([1, 2, 3])], { type: 'application/octet-stream' });
+    const secondBlob = new Blob([new Uint8Array([1, 2, 3])], { type: 'application/octet-stream' });
+
+    const first = client.load(firstBlob, { engine: 'mediapipe', loadKey: 'cached:model:v1' });
+    const second = client.load(secondBlob, { engine: 'mediapipe', loadKey: 'cached:model:v1' });
+
+    expect(worker.messages).toHaveLength(1);
+    worker.emit({ type: 'ready' });
+    await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it('does not guess Blob identity from size and MIME type alone', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+    const firstBlob = new Blob(['aaa'], { type: 'application/octet-stream' });
+    const secondBlob = new Blob(['bbb'], { type: 'application/octet-stream' });
+
+    const first = client.load(firstBlob, { engine: 'mediapipe' });
+    await expect(
+      client.load(secondBlob, { engine: 'mediapipe' }),
+    ).rejects.toThrow('different worker model or engine is already loading');
+
+    worker.emit({ type: 'ready' });
+    await first;
+  });
+
+  it('makes the complete load-options structure participate in dedupe identity', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+    const model = new Blob(['model']);
+
+    const first = client.load(model, {
+      engine: 'mediapipe',
+      mediaPipe: { temperature: 0.5 },
+      loadKey: 'model',
+    });
+
+    await expect(
+      client.load(model, {
+        engine: 'mediapipe',
+        mediaPipe: { temperature: 0.6 },
+        loadKey: 'model',
+      }),
+    ).rejects.toThrow('different worker model or engine is already loading');
+
+    await expect(
+      client.load(model, {
+        engine: 'mediapipe',
+        mediaPipe: {},
+        loadKey: 'model',
+      }),
+    ).rejects.toThrow('different worker model or engine is already loading');
+
+    worker.emit({ type: 'ready' });
+    await first;
+  });
+
   it('rejects a conflicting concurrent load instead of pretending the first model satisfies it', async () => {
     const worker = new FakeWorker();
     const client = new LiteRtLmWorkerClient(() => worker);

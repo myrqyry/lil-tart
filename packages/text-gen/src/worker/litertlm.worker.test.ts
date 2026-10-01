@@ -8,6 +8,20 @@ const mediaPipe = vi.hoisted(() => ({
   dispose: vi.fn(),
 }));
 
+const liteRt = vi.hoisted(() => ({
+  createEngine: vi.fn(),
+  createConversation: vi.fn(),
+  engineDelete: vi.fn(),
+  conversationCancel: vi.fn(),
+  conversationDelete: vi.fn(),
+  sendMessage: vi.fn(),
+  sendMessageStreaming: vi.fn(),
+}));
+
+vi.mock('@litert-lm/core', () => ({
+  Engine: { create: liteRt.createEngine },
+}));
+
 vi.mock('./mediapipe-engine', () => ({
   MediaPipeMultimodalEngine: class {
     load(model: string | Blob, options?: unknown) {
@@ -60,6 +74,25 @@ describe('LiteRT-LM worker dispatch', () => {
     vi.clearAllMocks();
     mediaPipe.load.mockResolvedValue(undefined);
     mediaPipe.generate.mockResolvedValue('');
+
+    liteRt.sendMessage.mockResolvedValue({ text: '' });
+    liteRt.sendMessageStreaming.mockReturnValue(
+      new ReadableStream({
+        start(controller) {
+          controller.close();
+        },
+      }),
+    );
+    liteRt.createConversation.mockResolvedValue({
+      sendMessage: liteRt.sendMessage,
+      sendMessageStreaming: liteRt.sendMessageStreaming,
+      cancel: liteRt.conversationCancel,
+      delete: liteRt.conversationDelete,
+    });
+    liteRt.createEngine.mockResolvedValue({
+      createConversation: liteRt.createConversation,
+      delete: liteRt.engineDelete,
+    });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -114,6 +147,76 @@ describe('LiteRT-LM worker dispatch', () => {
     expect(mediaPipe.load).toHaveBeenCalledTimes(2);
     expect(messages).not.toContainEqual({ type: 'complete', id: 'active' });
     expect(messages.filter((message) => message.type === 'ready')).toHaveLength(2);
+  });
+
+  it('cancels LiteRT-LM generation that is waiting for createConversation', async () => {
+    const { scope, messages } = await bootWorker();
+    send(scope, { type: 'load', model: 'model.litertlm' });
+    await flushWorker();
+
+    let releaseConversation!: () => void;
+    liteRt.createConversation.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        releaseConversation = () => resolve({
+          sendMessage: liteRt.sendMessage,
+          sendMessageStreaming: liteRt.sendMessageStreaming,
+          cancel: liteRt.conversationCancel,
+          delete: liteRt.conversationDelete,
+        });
+      }),
+    );
+
+    send(scope, { type: 'generate', id: 'litert-pending', prompt: 'hello' });
+    await flushWorker();
+    expect(liteRt.createConversation).toHaveBeenCalledTimes(1);
+
+    send(scope, { type: 'cancel', id: 'litert-pending' });
+    expect(liteRt.conversationCancel).not.toHaveBeenCalled();
+
+    releaseConversation();
+    await flushWorker();
+
+    expect(liteRt.conversationDelete).toHaveBeenCalledTimes(1);
+    expect(liteRt.sendMessageStreaming).not.toHaveBeenCalled();
+    expect(messages).not.toContainEqual({ type: 'complete', id: 'litert-pending' });
+
+    // The generation's finally block must clear bookkeeping: a late cancel for
+    // the same id is ignored rather than resurrecting cancellation state.
+    send(scope, { type: 'cancel', id: 'litert-pending' });
+    expect(liteRt.conversationCancel).not.toHaveBeenCalled();
+  });
+
+  it('cancels active LiteRT-LM generation before serialized dispose tears down the engine', async () => {
+    const { scope, messages } = await bootWorker();
+    send(scope, { type: 'load', model: 'model.litertlm' });
+    await flushWorker();
+
+    let streamController!: ReadableStreamDefaultController<unknown>;
+    liteRt.sendMessageStreaming.mockReturnValueOnce(
+      new ReadableStream({
+        start(controller) {
+          streamController = controller;
+        },
+      }),
+    );
+
+    send(scope, { type: 'generate', id: 'litert-active', prompt: 'hello' });
+    await flushWorker();
+    expect(liteRt.sendMessageStreaming).toHaveBeenCalledTimes(1);
+
+    send(scope, { type: 'dispose' });
+    expect(liteRt.conversationCancel).toHaveBeenCalledTimes(1);
+
+    streamController.close();
+    await flushWorker();
+
+    expect(liteRt.conversationDelete).toHaveBeenCalledTimes(1);
+    expect(liteRt.engineDelete).toHaveBeenCalledTimes(1);
+    expect(messages).toContainEqual({ type: 'disposed' });
+    expect(messages).not.toContainEqual({ type: 'complete', id: 'litert-active' });
+
+    send(scope, { type: 'cancel', id: 'litert-active' });
+    expect(liteRt.conversationCancel).toHaveBeenCalledTimes(1);
   });
 
   it('ignores late cancellation for an unknown generation id', async () => {

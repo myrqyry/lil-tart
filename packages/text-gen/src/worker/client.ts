@@ -31,23 +31,54 @@ interface ActiveLoadRequest {
   options?: LiteRtLmWorkerLoadOptions;
 }
 
+function canonicalValue(value: unknown): unknown {
+  if (value === undefined) return ['undefined'];
+  if (value === null) return ['null'];
+
+  switch (typeof value) {
+    case 'string':
+    case 'number':
+    case 'boolean':
+      return [typeof value, value];
+    case 'object':
+      if (Array.isArray(value)) {
+        return ['array', value.map((item) => canonicalValue(item))];
+      }
+      return [
+        'object',
+        Object.keys(value as Record<string, unknown>)
+          .sort()
+          .map((key) => [
+            key,
+            canonicalValue((value as Record<string, unknown>)[key]),
+          ]),
+      ];
+    default:
+      throw new Error(`Unsupported worker load option type: ${typeof value}`);
+  }
+}
+
 function loadOptionsKey(options?: LiteRtLmWorkerLoadOptions): string {
-  const mediaPipe = options?.mediaPipe;
-  return JSON.stringify({
-    engine: options?.engine ?? 'litert-lm',
-    mediaPipe: mediaPipe
-      ? {
-          wasmBaseUrl: mediaPipe.wasmBaseUrl ?? null,
-          maxTokens: mediaPipe.maxTokens ?? null,
-          topK: mediaPipe.topK ?? null,
-          temperature: mediaPipe.temperature ?? null,
-          randomSeed: mediaPipe.randomSeed ?? null,
-          maxNumImages: mediaPipe.maxNumImages ?? null,
-          supportAudio: mediaPipe.supportAudio ?? null,
-          disableRewinding: mediaPipe.disableRewinding ?? null,
-        }
-      : null,
-  });
+  // Canonicalize the complete public options object rather than transcribing
+  // today's fields. New options therefore participate in load identity
+  // automatically, and explicit empty objects remain distinct from omission.
+  return JSON.stringify(canonicalValue(options));
+}
+
+function sameModelIdentity(
+  left: ActiveLoadRequest,
+  model: string | Blob,
+  options?: LiteRtLmWorkerLoadOptions,
+): boolean {
+  if (left.model === model) return true;
+
+  if (left.model instanceof Blob && model instanceof Blob) {
+    const leftKey = left.options?.loadKey?.trim();
+    const rightKey = options?.loadKey?.trim();
+    return Boolean(leftKey && rightKey && leftKey === rightKey);
+  }
+
+  return false;
 }
 
 function sameLoadRequest(
@@ -55,7 +86,8 @@ function sameLoadRequest(
   model: string | Blob,
   options?: LiteRtLmWorkerLoadOptions,
 ): boolean {
-  return left.model === model && loadOptionsKey(left.options) === loadOptionsKey(options);
+  return sameModelIdentity(left, model, options)
+    && loadOptionsKey(left.options) === loadOptionsKey(options);
 }
 
 function createAbortError(): DOMException {

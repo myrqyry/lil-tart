@@ -30,6 +30,12 @@ export interface LiteRtLmWorkerMediaPipeLoadOptions {
 export interface LiteRtLmWorkerLoadOptions {
   engine?: LiteRtLmWorkerEngine;
   mediaPipe?: LiteRtLmWorkerMediaPipeLoadOptions;
+  /**
+   * Optional caller-owned identity for Blob-backed models. Supply this when
+   * independently-created Blob objects represent the same cached model and
+   * should deduplicate an in-flight load.
+   */
+  loadKey?: string;
 }
 
 export type LiteRtLmWorkerPromptPart =
@@ -37,6 +43,11 @@ export type LiteRtLmWorkerPromptPart =
   | { type: 'image'; data: Blob }
   | {
       type: 'audio';
+      /**
+       * PCM samples remain caller-owned. The current client structured-clones
+       * this array when posting to the worker, so large clips incur one buffer
+       * copy rather than detaching the caller's data.
+       */
       audioSamples: Float32Array;
       audioSampleRateHz: number;
     };

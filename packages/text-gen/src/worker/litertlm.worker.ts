@@ -154,6 +154,11 @@ async function generateLiteRtLm(
   if (cancelledGenerations.has(id)) return;
   if (!liteRtLmEngine) throw new Error('LiteRT-LM is not loaded');
   const conversation = await liteRtLmEngine.createConversation(buildConversationConfig(config));
+  if (cancelledGenerations.has(id)) {
+    await conversation.delete();
+    return;
+  }
+
   activeConversations.set(id, conversation);
   try {
     await replayHistory(conversation, config?.history);
@@ -166,7 +171,9 @@ async function generateLiteRtLm(
         if (text) emit({ type: 'token', id, text });
       },
     );
-    emit({ type: 'complete', id });
+    if (!cancelledGenerations.has(id)) {
+      emit({ type: 'complete', id });
+    }
   } finally {
     await disposeConversation(id, conversation);
   }
@@ -311,6 +318,12 @@ worker.onmessage = (event: MessageEvent<LiteRtLmWorkerRequest>) => {
   if (data.type === 'cancel') {
     cancelGeneration(data.id);
     return;
+  }
+
+  if (data.type === 'dispose') {
+    // Teardown itself remains serialized, but interrupt native work now so the
+    // queued dispose is not forced to wait for an abandoned generation.
+    for (const id of knownGenerationIds) cancelGeneration(id);
   }
 
   if (data.type === 'generate') {

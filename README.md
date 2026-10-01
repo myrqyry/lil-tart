@@ -195,6 +195,14 @@ The development command starts Lil Tart from `apps/playground`.
 explicit `mediapipe` engine for structured text/image/audio prompts. Image
 Blobs are decoded to worker-native `ImageBitmap` sources; audio crosses the
 worker boundary as PCM `Float32Array` samples plus an explicit sample rate.
+The client intentionally preserves caller ownership of PCM arrays, so worker
+`postMessage` structured-clones that audio buffer once instead of detaching it;
+consumers should account for that copy when sending long clips.
+
+Blob-backed model loads use object identity by default. Consumers that may
+recreate the same cached Blob while a load is already in flight can provide a
+stable `loadKey` in the worker load options to opt into safe deduplication;
+Lil Tart does not guess model identity from Blob size/MIME metadata.
 The worker's `advertisedEngines` list is a build-time statement only; consumers
 must treat a successful `load()` as the runtime availability check for the
 chosen browser, model, WebGPU environment, and host policy.
