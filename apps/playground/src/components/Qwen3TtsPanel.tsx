@@ -1,10 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
-import { Qwen3TtsPipeline, qwen3TtsManifest, type QwenTtsConfig } from '@litert-playground/qwen3-tts'
+import {
+  Qwen3TtsPipeline,
+  QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES,
+  createQwen3TtsManifest,
+  qwen3TtsVariants,
+  type Qwen3TtsVariantId,
+  type QwenTtsConfig,
+} from '@litert-playground/qwen3-tts'
 import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
 import { createModelLibraryAssetResolver, registerModelAssets } from '../modelStorage'
-import type { PipelineProgress } from '@litert-playground/inference-core'
+import { type PipelineProgress } from '@litert-playground/inference-core'
 
 let pipeline: Qwen3TtsPipeline | null = null
+
+type PlaygroundQwenVariant = Qwen3TtsVariantId
+
+const PLAYGROUND_QWEN_VARIANT_LABELS = {
+  fp32: 'FP32 (published default)',
+  int4: 'INT4 talker / FP32 auxiliaries',
+  browserMemory: 'Browser-memory (experimental)',
+  browserMemoryOmni: 'Browser-memory Omni MTP (qualification)',
+} satisfies Record<PlaygroundQwenVariant, string>
+
+const PLAYGROUND_QWEN_VARIANTS = (
+  Object.keys(PLAYGROUND_QWEN_VARIANT_LABELS) as PlaygroundQwenVariant[]
+).map(id => ({ id, label: PLAYGROUND_QWEN_VARIANT_LABELS[id] }))
 
 export function Qwen3TtsPanel() {
   const [text, setText] = useState('Hello, welcome to my world.')
@@ -13,6 +33,7 @@ export function Qwen3TtsPanel() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [status, setStatus] = useState('Not loaded')
   const [error, setError] = useState<string | null>(null)
+  const [variantId, setVariantId] = useState<PlaygroundQwenVariant>('fp32')
   const [cfg, setCfg] = useState<QwenTtsConfig>({
     temperature: 0.85,
     topK: 25,
@@ -22,6 +43,8 @@ export function Qwen3TtsPanel() {
     language: 'english'
   })
 
+  const selectedManifest = createQwen3TtsManifest(qwen3TtsVariants[variantId])
+  const downloadGiB = selectedManifest.memory.downloadBytes / (1024 ** 3)
   const updateCfg = (updater: (prev: QwenTtsConfig) => QwenTtsConfig) => setCfg(updater)
   const ctxRef = useRef<ManagedLiteRtRuntimeContext | null>(null)
 
@@ -50,16 +73,21 @@ export function Qwen3TtsPanel() {
 
     try {
       await disposePipeline()
-      registerModelAssets(qwen3TtsManifest.modelId, qwen3TtsManifest.assets.map((asset) => asset.path))
 
-      const p = new Qwen3TtsPipeline()
+      const p = new Qwen3TtsPipeline(qwen3TtsVariants[variantId])
+      registerModelAssets(p.manifest.modelId, p.manifest.assets.map((asset) => asset.path))
       p.onProgress = (pr: PipelineProgress) => {
         setProgress(`${pr.phase} ${pr.step}/${pr.total}`)
       }
 
       const ctx = await createLiteRtRuntime({
         assetBase: '/models/qwen3-tts',
-        assets: createModelLibraryAssetResolver('/models/qwen3-tts/'),
+        assets: createModelLibraryAssetResolver('/models/qwen3-tts/', {
+          manifest: p.manifest,
+          verificationOptions: {
+            maxSha256Bytes: QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES,
+          },
+        }),
       })
       ctxRef.current = ctx
       await p.load(ctx)
@@ -106,7 +134,18 @@ export function Qwen3TtsPanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-sm text-on-surface-variant">Status: {status}</div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <select
+            aria-label="Qwen3-TTS graph set"
+            className="rounded-lg border border-outline bg-surface-container px-2 py-1 text-xs text-on-surface"
+            value={variantId}
+            disabled={status === 'Loading...' || status === 'Ready'}
+            onChange={e => setVariantId(e.target.value as PlaygroundQwenVariant)}
+          >
+            {PLAYGROUND_QWEN_VARIANTS.map(variant => (
+              <option key={variant.id} value={variant.id}>{variant.label}</option>
+            ))}
+          </select>
           <select
             className="rounded-lg border border-outline bg-surface-container px-2 py-1 text-xs text-on-surface"
             value={cfg.language}
@@ -153,7 +192,14 @@ export function Qwen3TtsPanel() {
           </button>
         )}
         <p className="self-center text-[11px] text-on-surface-variant">
+          Selected graph set downloads about {downloadGiB.toFixed(2)} GiB of required assets.{' '}
           Model assets are only fetched when inference actually needs them.
+          {variantId === 'fp32'
+            ? ' FP32 is the published full-fidelity set and may exceed practical browser memory on some systems.'
+            : ''}
+          {variantId === 'browserMemory'
+            ? ' The browser-memory graph set is experimental and uses mtp_folded_int8.tflite.'
+            : ''}
         </p>
       </div>
 

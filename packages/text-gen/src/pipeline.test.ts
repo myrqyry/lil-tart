@@ -3,10 +3,13 @@ import type { RuntimeContext } from '@litert-playground/inference-core';
 import { TransformersTextPipeline } from "./transformers-pipeline";
 import { LiteRtLmTextPipeline } from "./litertlm-pipeline";
 import {
+  gemma4E2bManifest,
+  gemma4E4bManifest,
   lfm2_5InstructManifest,
   lfm2_5InstructInt8Manifest,
   lfm2_5ThinkingManifest,
   lfm2_5ThinkingInt8Manifest,
+  litertLmManifest,
   selectTextGenerationManifest,
 } from "./manifest";
 
@@ -178,7 +181,7 @@ describe("LiteRtLmTextPipeline", () => {
           { role: "assistant", content: "yo" },
         ],
       },
-      { model: "litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm" }
+      { model: litertLmManifest.assets[0].path }
     );
 
     expect(result.kind).toBe("text");
@@ -444,7 +447,7 @@ describe("LiteRtLmTextPipeline", () => {
     expect(mockEngineCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         model:
-          "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+          "litert-community/LFM2.5-1.2B-Thinking/resolve/1b1e49ad9dccdededc9d03bc0fe3071d83595d75/LFM2.5-1.2B-Thinking_int4.litertlm",
         backend: "wasm",
       })
     );
@@ -577,7 +580,7 @@ describe("LiteRtLmTextPipeline", () => {
     await p.load(fakeContext());
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/1b1e49ad9dccdededc9d03bc0fe3071d83595d75/LFM2.5-1.2B-Thinking_int4.litertlm",
       expect.objectContaining({ credentials: "same-origin" })
     );
 
@@ -684,7 +687,7 @@ describe("LiteRtLmTextPipeline", () => {
       expect(mockEngineCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           model:
-            "litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+            "litert-community/LFM2.5-1.2B-Thinking/resolve/1b1e49ad9dccdededc9d03bc0fe3071d83595d75/LFM2.5-1.2B-Thinking_int4.litertlm",
         })
       );
     } finally {
@@ -798,9 +801,38 @@ describe("LiteRtLmTextPipeline", () => {
     await p.load(fakeContext());
 
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/main/LFM2.5-1.2B-Thinking_int4.litertlm",
+      "https://huggingface.co/litert-community/LFM2.5-1.2B-Thinking/resolve/1b1e49ad9dccdededc9d03bc0fe3071d83595d75/LFM2.5-1.2B-Thinking_int4.litertlm",
       expect.anything()
     );
+  });
+});
+
+describe("pinned LiteRT-LM model artifacts", () => {
+  it("uses the pinned Qwen manifest path for the default pipeline", async () => {
+    const p = new LiteRtLmTextPipeline()
+    await p.load(fakeContext())
+
+    expect(mockEngineCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: litertLmManifest.assets[0].path }),
+    )
+    expect(litertLmManifest.assets[0].path).not.toContain('/resolve/main/')
+  })
+
+  it("uses immutable Hugging Face revisions with exact integrity metadata", () => {
+    for (const manifest of [
+      litertLmManifest,
+      lfm2_5InstructManifest,
+      lfm2_5InstructInt8Manifest,
+      lfm2_5ThinkingManifest,
+      lfm2_5ThinkingInt8Manifest,
+      gemma4E2bManifest,
+      gemma4E4bManifest,
+    ]) {
+      const asset = manifest.assets[0];
+      expect(asset.path).toMatch(/\/resolve\/[0-9a-f]{40}\//);
+      expect(asset.sha256).toMatch(/^[0-9a-f]{64}$/);
+      expect(asset.bytes).toBe(manifest.memory.downloadBytes);
+    }
   });
 });
 

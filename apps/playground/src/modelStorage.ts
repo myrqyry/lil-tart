@@ -1,8 +1,12 @@
 import {
+  InferenceError,
   createHttpAssetResolver,
+  createManifestVerifyingAssetResolver,
+  type AssetIntegrityVerificationOptions,
   type AssetRequestOptions,
   type AssetResolver,
   type ModelAsset,
+  type ModelManifest,
 } from '@litert-playground/inference-core'
 
 const CACHE_NAME = 'lil-tart-model-library-v1'
@@ -14,6 +18,11 @@ export interface StoredModelInfo {
   bytes: number
   assets: number
   unverified?: boolean
+}
+
+export interface ModelLibraryIntegrityOptions {
+  manifest: ModelManifest
+  verificationOptions?: AssetIntegrityVerificationOptions
 }
 
 function pageBase(): string {
@@ -81,13 +90,32 @@ export function registerModelAssets(modelId: string, paths: readonly string[]): 
   }
 }
 
-export function createModelLibraryAssetResolver(base: string): AssetResolver {
+export function createModelLibraryAssetResolver(
+  base: string,
+  integrity?: ModelLibraryIntegrityOptions,
+): AssetResolver {
   const inner = createHttpAssetResolver(base)
+  const verifiedSource = integrity
+    ? createManifestVerifyingAssetResolver(
+        integrity.manifest,
+        inner,
+        integrity.verificationOptions,
+      )
+    : inner
+
+  async function verifyCached(asset: ModelAsset, value: ArrayBuffer): Promise<ArrayBuffer> {
+    if (!integrity) return value
+    return createManifestVerifyingAssetResolver(
+      integrity.manifest,
+      { resolve: async () => value },
+      integrity.verificationOptions,
+    ).resolve(asset)
+  }
 
   async function resolve(asset: ModelAsset, options?: AssetRequestOptions): Promise<ArrayBuffer> {
     const owner = assetOwners.get(asset.path) ?? assetOwners.get(asset.id)
     const storage = cacheStorage()
-    if (!owner || !storage) return inner.resolve(asset, options)
+    if (!owner || !storage) return verifiedSource.resolve(asset, options)
 
     const assetUrl = resolvedAssetUrl(asset.path, base)
     const key = cacheKey(owner, assetUrl)
@@ -95,18 +123,61 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
     let cache: Cache | null = null
     try {
       cache = await storage.open(CACHE_NAME)
-      const cached = await cache.match(key)
-      if (cached) return cached.arrayBuffer()
     } catch {
       cache = null
     }
 
-    const fresh = await inner.resolve(asset, options)
+    if (cache) {
+      const activeCache = cache
+      let cached: Response | undefined
+      try {
+        cached = await activeCache.match(key)
+      } catch {
+        cache = null
+      }
+
+      if (cached) {
+        let cachedBytes: ArrayBuffer | null = null
+        try {
+          cachedBytes = await cached.arrayBuffer()
+        } catch {
+          // A cached body that can no longer be read is unusable storage, not
+          // an integrity verdict. Evict it and recover from the verified source.
+          try {
+            await activeCache.delete(key)
+          } catch {
+            cache = null
+          }
+        }
+
+        if (cachedBytes) {
+          try {
+            return await verifyCached(asset, cachedBytes)
+          } catch (error) {
+            if (!(error instanceof InferenceError) || error.code !== 'ASSET_INTEGRITY_FAILED') {
+              throw error
+            }
+
+            // Only an actual integrity verdict proves readable bytes are
+            // poisoned. Eviction failure degrades persistence, not the verified
+            // fresh-fetch path below.
+            try {
+              await activeCache.delete(key)
+            } catch {
+              cache = null
+            }
+          }
+        }
+      }
+    }
+
+    // Integrity-aware callers verify fresh bytes before they are persisted.
+    const fresh = await verifiedSource.resolve(asset, options)
     if (cache) {
       try {
         await cache.put(
           key,
-          new Response(fresh.slice(0), {
+          new Response(fresh, {
             headers: {
               'content-type': asset.mimeType ?? 'application/octet-stream',
               'x-lil-tart-bytes': String(fresh.byteLength),

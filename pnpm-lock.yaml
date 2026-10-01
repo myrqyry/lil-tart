@@ -226,6 +226,9 @@ importers:
         specifier: ^4.3.3
         version: 4.3.3
     devDependencies:
+      '@litert-playground/qwen3-tts':
+        specifier: workspace:*
+        version: link:packages/qwen3-tts
       '@types/node':
         specifier: ^26.1.1
         version: 26.1.1
@@ -546,17 +549,6 @@ importers:
 
 packages:
 
-  '@mingcute/icons@3.0.2':
-    resolution: {integrity: sha512-NuDZuZy0B/MmrdoVVOodOURS1qPqgcdSHFPKSG9gPEF6/dr0+zm5pfJs0U7Yta5jjoCdX0WZcVbZOov2tMMPTA==}
-
-  '@mingcute/react@3.0.2':
-    resolution: {integrity: sha512-DqzoUWHHIzetlKgrlAnbRq6qaYLFMjn+RFdh6EIEKxVocCvG6YGSfbR1jm6h05GbTQE/F3OA2iyn8rgEnT4LLg==}
-    peerDependencies:
-      react: ^18.0.0 || ^19.0.0
-
-  '@fontsource-variable/bricolage-grotesque@5.3.0':
-    resolution: {integrity: sha512-TLi9Q4hJjS2UvoTMRSS2nHu6c4R56lAw60NR9QYtVRCHn0XtsFpiEhNffZ8Glsoxu6wEEwLKBP8lb94J52PNBA==}
-
   '@emnapi/core@1.11.1':
     resolution: {integrity: sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ==}
 
@@ -721,6 +713,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@fontsource-variable/bricolage-grotesque@5.3.0':
+    resolution: {integrity: sha512-TLi9Q4hJjS2UvoTMRSS2nHu6c4R56lAw60NR9QYtVRCHn0XtsFpiEhNffZ8Glsoxu6wEEwLKBP8lb94J52PNBA==}
 
   '@huggingface/jinja@0.5.9':
     resolution: {integrity: sha512-uWTG+l3VJRsl7EXxYizuL3P+cCPoc3cRqbWWRcQN0FhejRfbdq0RNhCmbY/YDtnTcz9icdLYuLDjsnz4d8JMuw==}
@@ -913,6 +908,14 @@ packages:
 
   '@mediapipe/tasks-genai@0.10.29':
     resolution: {integrity: sha512-PRznwHOprGNoSbTbtAyHkMD1rslPLEBSidvz/Ga7qWVr86CXmPEcQpFCidLciBpWNKF8VhQMU2YA51YyBCbPKg==}
+
+  '@mingcute/icons@3.0.2':
+    resolution: {integrity: sha512-NuDZuZy0B/MmrdoVVOodOURS1qPqgcdSHFPKSG9gPEF6/dr0+zm5pfJs0U7Yta5jjoCdX0WZcVbZOov2tMMPTA==}
+
+  '@mingcute/react@3.0.2':
+    resolution: {integrity: sha512-DqzoUWHHIzetlKgrlAnbRq6qaYLFMjn+RFdh6EIEKxVocCvG6YGSfbR1jm6h05GbTQE/F3OA2iyn8rgEnT4LLg==}
+    peerDependencies:
+      react: ^18.0.0 || ^19.0.0
 
   '@napi-rs/wasm-runtime@1.1.6':
     resolution: {integrity: sha512-ZLv/JdUfkvOy9eCnnBaGfiO+XimbjebAeO+MRQqD/B+FR1tnRN0tpKSJHRbE8sFfS6aqsXZ67TQjfwfsxULVbg==}
@@ -1874,15 +1877,6 @@ packages:
 
 snapshots:
 
-  '@mingcute/icons@3.0.2': {}
-
-  '@mingcute/react@3.0.2(react@19.2.8)':
-    dependencies:
-      '@mingcute/icons': 3.0.2
-      react: 19.2.8
-
-  '@fontsource-variable/bricolage-grotesque@5.3.0': {}
-
   '@emnapi/core@1.11.1':
     dependencies:
       '@emnapi/wasi-threads': 1.2.2
@@ -1976,6 +1970,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.2':
     optional: true
+
+  '@fontsource-variable/bricolage-grotesque@5.3.0': {}
 
   '@huggingface/jinja@0.5.9': {}
 
@@ -2116,6 +2112,13 @@ snapshots:
   '@litertjs/wasm-utils@2.5.3': {}
 
   '@mediapipe/tasks-genai@0.10.29': {}
+
+  '@mingcute/icons@3.0.2': {}
+
+  '@mingcute/react@3.0.2(react@19.2.8)':
+    dependencies:
+      '@mingcute/icons': 3.0.2
+      react: 19.2.8
 
   '@napi-rs/wasm-runtime@1.1.6(@emnapi/core@1.11.1)(@emnapi/runtime@1.11.1)':
     dependencies:

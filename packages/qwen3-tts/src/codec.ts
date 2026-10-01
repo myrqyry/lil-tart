@@ -2,7 +2,8 @@ import { CompiledModel, Tensor } from '@litertjs/core'
 
 const NUM_CODE_GROUPS = 16
 const UPSAMPLE = 1920
-const OVERLAP_LEFT = 25
+export const QWEN3_TTS_CODEC_WINDOW_FRAMES = 64
+export const QWEN3_TTS_CODEC_LEFT_CONTEXT_FRAMES = 25
 
 export interface CodecConfig {
   chunkSize?: number
@@ -28,8 +29,8 @@ export class CodecDecoder {
     private model: CompiledModel,
     config?: CodecConfig,
   ) {
-    this.chunkSize = config?.chunkSize ?? 64
-    this.overlapLeft = config?.overlapLeft ?? OVERLAP_LEFT
+    this.chunkSize = config?.chunkSize ?? QWEN3_TTS_CODEC_WINDOW_FRAMES
+    this.overlapLeft = config?.overlapLeft ?? QWEN3_TTS_CODEC_LEFT_CONTEXT_FRAMES
     this.accelerator = config?.accelerator ?? 'wasm'
   }
 

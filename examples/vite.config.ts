@@ -4,10 +4,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import type { Connect, Plugin } from 'vite'
+import {
+  QWEN3_TTS_UPSTREAM_REPOSITORY,
+  QWEN3_TTS_UPSTREAM_REVISION,
+} from '@litert-playground/qwen3-tts/provenance'
 
 const root = path.resolve(__dirname, '..')
 const modelPrefix = '/models/qwen3-tts/'
-const modelRepository = 'litert-community/Qwen3-TTS-12Hz-0.6B-Base'
 const litertWasmPrefix = '/litert-wasm/'
 const litertWasmUpstream = 'https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/'
 const residencyWorkerFile = path.resolve(__dirname, 'minimal-qwen3-tts/residency-worker.js')
@@ -43,7 +46,7 @@ function qwenModelProxy(): Plugin {
     }
 
     const upstream = new URL(
-      `https://huggingface.co/${modelRepository}/resolve/main/${modelPath}`,
+      `https://huggingface.co/${QWEN3_TTS_UPSTREAM_REPOSITORY}/resolve/${QWEN3_TTS_UPSTREAM_REVISION}/${modelPath}`,
     )
     const headers = new Headers()
     for (const name of ['range', 'if-range', 'if-none-match', 'if-modified-since']) {

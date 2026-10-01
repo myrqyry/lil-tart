@@ -312,10 +312,13 @@ The current model set exceeds the practical browser WASM/JavaScript memory
 budget during prefill, even after experiments with MTP quantization, prompt and
 codec residency, reduced KV capacity, and browser-memory variants.
 
-The `browserMemory` manifest variant (`mtp_folded_int8`) and short-KV talker
-exports remain useful compatibility probes for future LiteRT.js/runtime
-improvements. The package architecture remains valuable for native/local LiteRT
-consumers even where browser-WASM is not practical.
+The playground graph-set selector defaults to the published `fp32` assets.
+The `browserMemory` manifest variant is explicitly labeled experimental and
+requires `talker_int4.tflite` plus the local `mtp_folded_int8.tflite`; it is
+not silently substituted for the published default. That reduced-memory variant
+and short-KV talker exports remain useful compatibility probes for future
+LiteRT.js/runtime improvements. The package architecture remains valuable for
+native/local LiteRT consumers even where browser-WASM is not practical.
 
 ## Verification philosophy
 

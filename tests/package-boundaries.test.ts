@@ -9,7 +9,10 @@ describe('workspace package boundaries', () => {
   it('keeps examples on public package entrypoints', async () => {
     const qwen = await text('examples/minimal-qwen3-tts/main.tsx')
     const kokoro = await text('examples/minimal-kokoro/main.ts')
-    expect(`${qwen}\n${kokoro}`).not.toMatch(/\.\.\/\.\/src|apps\/playground|podqast/)
+    const viteConfig = await text('examples/vite.config.ts')
+    expect(`${qwen}\n${kokoro}\n${viteConfig}`).not.toMatch(
+      /\.\.\/packages\/[^/]+\/src|\.\.\/\.\/src|apps\/playground|podqast/,
+    )
   })
 
   it('keeps package manifests directed from generic to specific code', async () => {
