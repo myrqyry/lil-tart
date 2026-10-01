@@ -160,7 +160,8 @@ async function generateLiteRtLm(
   }
 
   activeConversations.set(id, conversation);
-  let generationFinished = false;
+  let generationFailed = false;
+  let generationError: unknown;
   try {
     await replayHistory(conversation, config?.history);
     await streamResponse(
@@ -172,15 +173,29 @@ async function generateLiteRtLm(
         if (text) emit({ type: 'token', id, text });
       },
     );
-    generationFinished = true;
-  } finally {
-    await disposeConversation(id, conversation);
+  } catch (error) {
+    generationFailed = true;
+    generationError = error;
   }
 
-  // Conversation teardown is part of the generation lifecycle. Emitting
-  // complete only after it settles prevents a cancel during delete() from
-  // producing both complete and cancelled terminal events.
-  if (generationFinished && !cancelledGenerations.has(id)) {
+  try {
+    await disposeConversation(id, conversation);
+  } catch (cleanupError) {
+    if (generationFailed) {
+      if (generationError instanceof Error) {
+        const errorWithCause = generationError as Error & { cause?: unknown };
+        if (errorWithCause.cause === undefined) errorWithCause.cause = cleanupError;
+      }
+    } else {
+      console.warn('[text-gen worker] LiteRT-LM conversation cleanup failed', cleanupError);
+    }
+  }
+
+  if (generationFailed) throw generationError;
+
+  // Cleanup settles before the terminal event so cancellation can still win
+  // during teardown, but cleanup failure cannot erase successful inference.
+  if (!cancelledGenerations.has(id)) {
     emit({ type: 'complete', id });
   }
 }
