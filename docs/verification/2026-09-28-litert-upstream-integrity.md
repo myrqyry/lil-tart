@@ -22,14 +22,29 @@ Published Qwen3-TTS assets now carry the exact Hugging Face LFS byte size and
 SHA-256 recorded at repository revision
 `528cca7d2ddf6f5c1e1127f24a7f8786f80fa6e8`.
 
-The manifest verifier now matches an asset by semantic ID or exact path. This
-matters because `runtime-litert` internally asks for model paths as both the
-request ID and path, while manifests can use semantic IDs such as `talker`.
+The manifest verifier now applies integrity facts by exact asset path. This
+covers `runtime-litert` requests that identify model files by their path while
+also preventing dynamic assets that reuse a semantic ID from inheriting another
+path's checksum. In particular, a configured voice other than
+`voices/demo_speaker.npy` remains unverified unless that exact voice path has
+its own manifest facts.
 
 Both Qwen execution paths now use manifest verification: the direct playground
 path and the generator/decoder worker contexts. The local experimental
 `mtp_folded_int8.tflite` keeps its known byte size but deliberately has no
 invented checksum.
+
+The `browserMemoryOmni` qualification variant is mixed-source: its
+`mtp_fp32.tflite` comes from
+`uralstech/Qwen3-TTS-12Hz-0.6B-Base-litert-lm-omni` revision
+`791880469d874546d884a0e6cf68564a61c04ca9`. Its 440,528,628-byte size and
+SHA-256 are therefore recorded separately from the base repository's
+same-named 440,526,692-byte MTP artifact.
+
+The runnable example model proxy also resolves the exported
+`QWEN3_TTS_UPSTREAM_REVISION` rather than mutable `main`. The pinned revision
+contains the folded browser-memory MTP as well as the published base assets, so
+pinning the proxy does not break the minimal browser-memory example.
 
 ## LiteRT-LM source pinning
 

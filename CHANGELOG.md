@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Pin LiteRT-LM Hugging Face artifacts to immutable upstream revisions and record their published byte sizes and SHA-256 provenance instead of following mutable `main` paths.
-- Enforce Qwen3-TTS manifest integrity on both direct and worker execution paths, including runtime requests that identify an asset by its file path rather than its semantic manifest ID.
+- Enforce Qwen3-TTS manifest integrity on both direct and worker execution paths using exact-path provenance, preserve custom voices without invented demo-speaker hashes, keep the qualified Omni MTP's distinct integrity facts, and pin the runnable example proxy to the same immutable upstream revision.
 - `fix(text-gen)`: harden downstream LiteRT-LM lifecycle after review: validate and accumulate tool calls until clean stream completion, normalize runtime tool arguments, require renewable factories for caller-owned streams, reject explicit WebNN requests while preserving RuntimeContext fallback, reject concurrent loads before they can race native engine creation, prevent reload from orphaning an engine after cleanup failure, preserve completed inference and primary errors across cleanup failures, and keep the pipeline busy until conversation teardown settles.
 - `fix(tooling)`: pin the pnpm dev-engine to an exact 11.17.0 version so pnpm can validate and run the repository gate.
 - `fix(text-gen)`, `fix(encoder)`, `fix(retrieval)`: preserve caller-signal cancellation checks from `2200684` when combining late-result and disposal cleanup fixes

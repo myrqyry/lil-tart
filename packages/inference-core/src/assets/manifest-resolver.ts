@@ -7,9 +7,10 @@ import {
 } from '../types'
 
 function assetFromManifest(manifest: ModelManifest, asset: ModelAsset): ModelAsset {
-  return manifest.assets.find(
-    (candidate) => candidate.id === asset.id || candidate.path === asset.path,
-  ) ?? asset
+  // Integrity facts describe bytes at a concrete path. Semantic IDs can be
+  // reused for dynamic assets (for example different TTS voices), so an ID
+  // match must never make one path inherit another path's size/hash.
+  return manifest.assets.find((candidate) => candidate.path === asset.path) ?? asset
 }
 
 function bytesFromStream(stream: ReadableStream<Uint8Array>): Promise<ArrayBuffer> {

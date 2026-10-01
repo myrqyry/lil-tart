@@ -99,6 +99,20 @@ describe('manifest-verifying asset resolver', () => {
     })
   })
 
+  it('does not apply one semantic ID\'s integrity facts to a different path', async () => {
+    const verifying = createManifestVerifyingAssetResolver(
+      {
+        ...manifest,
+        assets: [{ id: 'voice', path: 'voices/demo_speaker.npy', bytes: 4 }],
+      },
+      resolver(),
+    )
+
+    await expect(
+      verifying.resolve({ id: 'voice', path: 'voices/custom_speaker.npy', optional: true }),
+    ).resolves.toEqual(bytes)
+  })
+
   it('does not require absent verification facts', async () => {
     await expect(
       createManifestVerifyingAssetResolver(manifest, resolver()).resolve({ id: 'model', path: 'model.bin' }),

@@ -8,6 +8,11 @@ interface PublishedAsset {
   sha256: string
 }
 
+const QWEN3_TTS_OMNI_MTP: PublishedAsset = {
+  bytes: 440_528_628,
+  sha256: '7e808fb554fdf443e70e5ccdd3fdccd3cd74cdec606d3375fa4c5877d4f46e0b',
+}
+
 const PUBLISHED_ASSETS: Readonly<Record<string, PublishedAsset>> = {
   'tokenizer.json': {
     bytes: 11_424_262,
@@ -79,8 +84,14 @@ export const qwen3TtsVariants: Record<string, Qwen3TtsVariant> = {
   },
 }
 
-function publishedAsset(id: string, path: string, fallbackBytes?: number, optional?: boolean): ModelAsset {
-  const published = PUBLISHED_ASSETS[path]
+function publishedAsset(
+  id: string,
+  path: string,
+  fallbackBytes?: number,
+  optional?: boolean,
+  publishedOverride?: PublishedAsset,
+): ModelAsset {
+  const published = publishedOverride ?? PUBLISHED_ASSETS[path]
   return {
     id,
     path,
@@ -93,7 +104,13 @@ function assetsFor(variant: Qwen3TtsVariant): ModelAsset[] {
   return [
     publishedAsset('tokenizer', 'tokenizer.json'),
     publishedAsset('talker', variant.talker),
-    publishedAsset('mtp', variant.mtp, variant.id === 'browserMemory' ? 229_608_368 : undefined),
+    publishedAsset(
+      'mtp',
+      variant.mtp,
+      variant.id === 'browserMemory' ? 229_608_368 : undefined,
+      false,
+      variant.id === 'browserMemoryOmni' ? QWEN3_TTS_OMNI_MTP : undefined,
+    ),
     publishedAsset('codec-decoder', variant.codec),
     publishedAsset('codec-embedding', 'tables/codec_embedding_fp32.npy'),
     publishedAsset('mtp-embeddings', 'tables/mtp_embeddings_fp16.npy'),
