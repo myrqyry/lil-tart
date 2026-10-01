@@ -39,13 +39,11 @@ function shouldVerifySha256(
 function bytesFromStream(
   asset: ModelAsset,
   stream: ReadableStream<Uint8Array>,
-  options: AssetIntegrityVerificationOptions,
 ): Promise<ArrayBuffer> {
   return (async () => {
     const reader = stream.getReader()
     const chunks: Uint8Array[] = []
     const expectedBytes = asset.bytes
-    const maxSha256Bytes = options.maxSha256Bytes
     let total = 0
 
     while (true) {
@@ -61,15 +59,6 @@ function bytesFromStream(
           { asset: asset.id, stage: 'assets' },
         )
       }
-      if (maxSha256Bytes !== undefined && nextTotal > maxSha256Bytes) {
-        await reader.cancel('asset exceeds SHA-256 buffer ceiling')
-        throw new InferenceError(
-          'ASSET_INTEGRITY_FAILED',
-          `${asset.id}: streamed asset exceeds ${maxSha256Bytes} byte SHA-256 buffer ceiling`,
-          { asset: asset.id, stage: 'assets' },
-        )
-      }
-
       chunks.push(next.value)
       total = nextTotal
     }
@@ -196,7 +185,7 @@ export function createManifestVerifyingAssetResolver(
 
           const verified = await verifyAssetIntegrity(
             manifestAsset,
-            await bytesFromStream(manifestAsset, stream, verificationOptions),
+            await bytesFromStream(manifestAsset, stream),
             verificationOptions,
           )
           return new ReadableStream({

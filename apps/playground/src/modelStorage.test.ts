@@ -20,6 +20,7 @@ interface FakeEntry {
   base?: string
   path?: string
   body?: ArrayBuffer
+  readError?: Error
 }
 
 // One shared store, so deletions persist across open() calls the way real
@@ -40,7 +41,7 @@ function cache() {
     match: async (request: Request) => {
       const entry = store.get(request.url)
       if (!entry) return undefined
-      return new Response(entry.body ?? new Uint8Array(entry.bytes), {
+      const response = new Response(entry.body ?? new Uint8Array(entry.bytes), {
         headers: {
           'x-lil-tart-bytes': String(entry.bytes),
           'x-lil-tart-asset-url': entry.assetUrl,
@@ -48,6 +49,12 @@ function cache() {
           ...(entry.path ? { 'x-lil-tart-asset-path': entry.path } : {}),
         },
       })
+      if (entry.readError) {
+        Object.defineProperty(response, 'arrayBuffer', {
+          value: vi.fn().mockRejectedValue(entry.readError),
+        })
+      }
+      return response
     },
     put: async (request: Request, response: Response) => {
       const body = await response.arrayBuffer()
@@ -410,6 +417,33 @@ describe('integrity-aware model library resolver', () => {
 
     expect(store.size).toBe(0)
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('evicts an unreadable cached body and recovers with fresh verified bytes', async () => {
+    registerModelAssets(modelId, [asset.path])
+    seed([{
+      url: cacheKeyUrl(modelId, assetUrl),
+      bytes: 3,
+      body: new Uint8Array([1, 2, 3]).buffer,
+      readError: new TypeError('cached body is unreadable'),
+      assetUrl,
+      base: HF,
+      path: asset.path,
+    }])
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3])),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const resolver = createModelLibraryAssetResolver(HF, { manifest })
+    const resolved = await resolver.resolve(asset)
+
+    expect(new Uint8Array(resolved)).toEqual(new Uint8Array([1, 2, 3]))
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(store.size).toBe(1)
+    expect([...store.values()][0].readError).toBeUndefined()
+    expect(new Uint8Array([...store.values()][0].body!)).toEqual(new Uint8Array([1, 2, 3]))
   })
 
   it('evicts a poisoned cached asset and recovers with fresh verified bytes', async () => {

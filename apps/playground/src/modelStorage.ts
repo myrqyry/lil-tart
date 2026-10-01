@@ -128,28 +128,44 @@ export function createModelLibraryAssetResolver(
     }
 
     if (cache) {
+      const activeCache = cache
       let cached: Response | undefined
       try {
-        cached = await cache.match(key)
+        cached = await activeCache.match(key)
       } catch {
         cache = null
       }
 
       if (cached) {
+        let cachedBytes: ArrayBuffer | null = null
         try {
-          return await verifyCached(asset, await cached.arrayBuffer())
-        } catch (error) {
-          if (!(error instanceof InferenceError) || error.code !== 'ASSET_INTEGRITY_FAILED') {
-            throw error
-          }
-
-          // Only an actual integrity verdict proves this persisted entry is
-          // poisoned. Eviction failure degrades persistence, not the verified
-          // fresh-fetch path below.
+          cachedBytes = await cached.arrayBuffer()
+        } catch {
+          // A cached body that can no longer be read is unusable storage, not
+          // an integrity verdict. Evict it and recover from the verified source.
           try {
-            await cache?.delete(key)
+            await activeCache.delete(key)
           } catch {
             cache = null
+          }
+        }
+
+        if (cachedBytes) {
+          try {
+            return await verifyCached(asset, cachedBytes)
+          } catch (error) {
+            if (!(error instanceof InferenceError) || error.code !== 'ASSET_INTEGRITY_FAILED') {
+              throw error
+            }
+
+            // Only an actual integrity verdict proves readable bytes are
+            // poisoned. Eviction failure degrades persistence, not the verified
+            // fresh-fetch path below.
+            try {
+              await activeCache.delete(key)
+            } catch {
+              cache = null
+            }
           }
         }
       }

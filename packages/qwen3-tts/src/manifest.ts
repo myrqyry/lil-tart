@@ -71,7 +71,7 @@ export interface Qwen3TtsVariant {
   backendSupport: Partial<Record<'webgpu' | 'wasm' | 'webnn', boolean | 'experimental'>>
 }
 
-export const qwen3TtsVariants: Record<string, Qwen3TtsVariant> = {
+const QWEN3_TTS_VARIANT_DEFINITIONS = {
   fp32: {
     id: 'fp32', talker: 'talker_fp32.tflite', mtp: 'mtp_fp32.tflite', codec: 'codec_decoder_fp32.tflite',
     quantization: 'fp32', backendSupport: { webgpu: 'experimental', wasm: true },
@@ -88,7 +88,15 @@ export const qwen3TtsVariants: Record<string, Qwen3TtsVariant> = {
     id: 'browserMemoryOmni', talker: 'talker_int4.tflite', mtp: 'mtp_fp32.tflite', codec: 'codec_decoder_fp32.tflite',
     quantization: 'int4 talker / Omni fp32 mtp / fp32 codec', backendSupport: { webgpu: 'experimental', wasm: true },
   },
-}
+} as const satisfies Record<string, Qwen3TtsVariant>
+
+export type Qwen3TtsVariantId = keyof typeof QWEN3_TTS_VARIANT_DEFINITIONS
+
+// Keep the historical broad lookup surface for downstream callers while the
+// exact id union above lets first-party UIs fail at compile time if definitions
+// and labels drift apart.
+export const qwen3TtsVariants: Record<string, Qwen3TtsVariant> =
+  QWEN3_TTS_VARIANT_DEFINITIONS
 
 function publishedAsset(
   id: string,

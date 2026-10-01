@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import {
   Qwen3TtsPipeline,
   QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES,
+  createQwen3TtsManifest,
   qwen3TtsVariants,
+  type Qwen3TtsVariantId,
   type QwenTtsConfig,
 } from '@litert-playground/qwen3-tts'
 import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
@@ -11,17 +13,18 @@ import { type PipelineProgress } from '@litert-playground/inference-core'
 
 let pipeline: Qwen3TtsPipeline | null = null
 
-type PlaygroundQwenVariant = 'fp32' | 'int4' | 'browserMemory' | 'browserMemoryOmni'
+type PlaygroundQwenVariant = Qwen3TtsVariantId
 
-const PLAYGROUND_QWEN_VARIANTS: Array<{
-  id: PlaygroundQwenVariant
-  label: string
-}> = [
-  { id: 'fp32', label: 'FP32 (published default)' },
-  { id: 'int4', label: 'INT4 talker / FP32 auxiliaries' },
-  { id: 'browserMemory', label: 'Browser-memory (experimental)' },
-  { id: 'browserMemoryOmni', label: 'Browser-memory Omni MTP (qualification)' },
-]
+const PLAYGROUND_QWEN_VARIANT_LABELS = {
+  fp32: 'FP32 (published default)',
+  int4: 'INT4 talker / FP32 auxiliaries',
+  browserMemory: 'Browser-memory (experimental)',
+  browserMemoryOmni: 'Browser-memory Omni MTP (qualification)',
+} satisfies Record<PlaygroundQwenVariant, string>
+
+const PLAYGROUND_QWEN_VARIANTS = (
+  Object.keys(PLAYGROUND_QWEN_VARIANT_LABELS) as PlaygroundQwenVariant[]
+).map(id => ({ id, label: PLAYGROUND_QWEN_VARIANT_LABELS[id] }))
 
 export function Qwen3TtsPanel() {
   const [text, setText] = useState('Hello, welcome to my world.')
@@ -40,6 +43,8 @@ export function Qwen3TtsPanel() {
     language: 'english'
   })
 
+  const selectedManifest = createQwen3TtsManifest(qwen3TtsVariants[variantId])
+  const downloadGiB = selectedManifest.memory.downloadBytes / (1024 ** 3)
   const updateCfg = (updater: (prev: QwenTtsConfig) => QwenTtsConfig) => setCfg(updater)
   const ctxRef = useRef<ManagedLiteRtRuntimeContext | null>(null)
 
@@ -187,7 +192,11 @@ export function Qwen3TtsPanel() {
           </button>
         )}
         <p className="self-center text-[11px] text-on-surface-variant">
+          Selected graph set downloads about {downloadGiB.toFixed(2)} GiB of required assets.{' '}
           Model assets are only fetched when inference actually needs them.
+          {variantId === 'fp32'
+            ? ' FP32 is the published full-fidelity set and may exceed practical browser memory on some systems.'
+            : ''}
           {variantId === 'browserMemory'
             ? ' The browser-memory graph set is experimental and uses mtp_folded_int8.tflite.'
             : ''}
