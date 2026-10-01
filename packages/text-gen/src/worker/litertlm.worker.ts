@@ -181,11 +181,15 @@ async function generateMediaPipe(id: string, prompt: LiteRtLmWorkerPrompt): Prom
 
   mediaPipeGenerationIds.add(id);
   try {
-    await mediaPipeEngine.generate(prompt, (text) => {
-      if (!cancelledGenerations.has(id) && text) {
-        emit({ type: 'token', id, text });
-      }
-    });
+    await mediaPipeEngine.generate(
+      prompt,
+      (text) => {
+        if (!cancelledGenerations.has(id) && text) {
+          emit({ type: 'token', id, text });
+        }
+      },
+      () => cancelledGenerations.has(id),
+    );
     if (!cancelledGenerations.has(id)) {
       emit({ type: 'complete', id });
     }

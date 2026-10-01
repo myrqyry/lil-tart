@@ -122,6 +122,34 @@ describe('MediaPipeMultimodalEngine', () => {
     expect(fake.close).toHaveBeenCalledTimes(1);
   });
 
+  it('does not start native inference when cancellation arrives during image decoding', async () => {
+    const fake = createFakeMediaPipe()
+    const closeBitmap = vi.fn()
+    const bitmap = { width: 1, height: 1, close: closeBitmap } as unknown as ImageBitmap
+    let releaseDecode!: () => void
+    const engine = new MediaPipeMultimodalEngine({
+      loadModule: async () => fake.module,
+      decodeImage: () => new Promise<ImageBitmap>((resolve) => {
+        releaseDecode = () => resolve(bitmap)
+      }),
+    })
+    await engine.load('model.task', { maxNumImages: 1 })
+
+    let cancelled = false
+    const running = engine.generate(
+      [{ type: 'image', data: new Blob(['image']) }],
+      vi.fn(),
+      () => cancelled,
+    )
+
+    cancelled = true
+    releaseDecode()
+
+    await expect(running).resolves.toBe('')
+    expect(fake.generateResponse).not.toHaveBeenCalled()
+    expect(closeBitmap).toHaveBeenCalledTimes(1)
+  })
+
   it('delegates active decoding cancellation to MediaPipe', async () => {
     const fake = createFakeMediaPipe();
     const engine = new MediaPipeMultimodalEngine({

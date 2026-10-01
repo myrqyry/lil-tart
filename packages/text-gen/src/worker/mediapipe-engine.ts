@@ -81,6 +81,7 @@ export class MediaPipeMultimodalEngine {
   async generate(
     prompt: LiteRtLmWorkerPrompt,
     onToken: (text: string, done: boolean) => void,
+    shouldCancel?: () => boolean,
   ): Promise<string> {
     if (!this.inference) {
       throw new Error('MediaPipe LLM Inference is not loaded');
@@ -90,6 +91,11 @@ export class MediaPipeMultimodalEngine {
     let streamed = '';
 
     try {
+      // Image decoding is asynchronous. Cancellation can arrive while
+      // createImageBitmap() is still running, before MediaPipe itself has any
+      // native work to cancel.
+      if (shouldCancel?.()) return '';
+
       const response = await this.inference.generateResponse(
         prepared.query,
         (partialResult, done) => {
