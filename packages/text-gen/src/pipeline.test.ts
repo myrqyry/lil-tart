@@ -505,7 +505,7 @@ describe("LiteRtLmTextPipeline", () => {
     await vi.waitFor(() => expect(p.status).toBe("loading"));
     await vi.waitFor(() => expect(mockEngineCreate).toHaveBeenCalledTimes(1));
     await expect(p.loadForBackend("wasm")).rejects.toMatchObject({
-      code: "INFERENCE_FAILED",
+      code: "INVALID_INPUT",
     });
     expect(mockEngineCreate).toHaveBeenCalledTimes(1);
 

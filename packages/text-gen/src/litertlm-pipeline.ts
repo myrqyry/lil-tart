@@ -336,6 +336,10 @@ export class LiteRtLmTextPipeline
         : manifestOrModelId;
   }
 
+  /**
+   * Load this pipeline once. Concurrent load attempts are invalid input and
+   * reject instead of sharing ownership across different backends/signals.
+   */
   async load(context: RuntimeContext): Promise<void> {
     // RuntimeContext can select WebNN before this package gets a vote. LiteRT-LM
     // does not expose a WebNN backend, so preserve the runtime path's historical
@@ -347,7 +351,9 @@ export class LiteRtLmTextPipeline
   /**
    * LiteRT-LM only needs a backend and optional cancellation signal. This
    * entrypoint lets downstream consumers use the text package without
-   * fabricating unrelated LiteRT tensor/runtime services.
+   * fabricating unrelated LiteRT tensor/runtime services. Do not call it
+   * concurrently on the same pipeline instance; reentrant loads reject as
+   * INVALID_INPUT so backend/signal ownership stays explicit.
    */
   async loadForBackend(backend: LiteRtLmBackend, signal?: AbortSignal): Promise<void> {
     // Keep a runtime check for untyped/JavaScript callers even though TypeScript
@@ -368,7 +374,7 @@ export class LiteRtLmTextPipeline
     if (this.status === 'ready') return;
     if (this.status === 'loading') {
       throw new InferenceError(
-        'INFERENCE_FAILED',
+        'INVALID_INPUT',
         'LiteRT-LM model loading is already in progress for this pipeline',
       );
     }
