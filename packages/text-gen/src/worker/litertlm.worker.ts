@@ -47,9 +47,10 @@ const worker = self as unknown as WorkerScope;
 let liteRtLmEngine: LiteRtLmEngine | undefined;
 let mediaPipeEngine: MediaPipeMultimodalEngine | undefined;
 let activeEngine: LiteRtLmWorkerEngine = 'litert-lm';
-let mediaPipeQueue: Promise<void> = Promise.resolve();
+let dispatchQueue: Promise<void> = Promise.resolve();
 const activeConversations = new Map<string, Conversation>();
 const mediaPipeGenerationIds = new Set<string>();
+const knownGenerationIds = new Set<string>();
 const cancelledGenerations = new Set<string>();
 
 function extractText(message: Message): string {
@@ -150,6 +151,7 @@ async function generateLiteRtLm(
   prompt: LiteRtLmWorkerPrompt,
   config?: LiteRtLmWorkerGenerationConfig,
 ): Promise<void> {
+  if (cancelledGenerations.has(id)) return;
   if (!liteRtLmEngine) throw new Error('LiteRT-LM is not loaded');
   const conversation = await liteRtLmEngine.createConversation(buildConversationConfig(config));
   activeConversations.set(id, conversation);
@@ -198,20 +200,6 @@ async function generateMediaPipe(id: string, prompt: LiteRtLmWorkerPrompt): Prom
   }
 }
 
-async function enqueueMediaPipeGeneration(
-  id: string,
-  prompt: LiteRtLmWorkerPrompt,
-): Promise<void> {
-  const task = mediaPipeQueue
-    .catch(() => undefined)
-    .then(() => generateMediaPipe(id, prompt));
-  mediaPipeQueue = task.then(
-    () => undefined,
-    () => undefined,
-  );
-  await task;
-}
-
 async function disposeAllConversations(): Promise<void> {
   for (const [id, conversation] of activeConversations) {
     conversation.cancel();
@@ -229,9 +217,6 @@ async function disposeLoadedEngine(): Promise<void> {
   }
 
   if (mediaPipeEngine) {
-    for (const id of mediaPipeGenerationIds) cancelledGenerations.add(id);
-    if (mediaPipeGenerationIds.size > 0) mediaPipeEngine.cancel();
-    await mediaPipeQueue.catch(() => undefined);
     mediaPipeEngine.dispose();
     mediaPipeEngine = undefined;
   }
@@ -254,8 +239,23 @@ async function loadEngine(data: Extract<LiteRtLmWorkerRequest, { type: 'load' }>
   });
 }
 
-worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
-  const data = event.data;
+function hasGenerationConfig(config?: LiteRtLmWorkerGenerationConfig): boolean {
+  return config !== undefined && Object.keys(config).length > 0;
+}
+
+function cancelGeneration(id: string): void {
+  // Ignore late/unknown cancels so cancellation bookkeeping cannot grow without
+  // a corresponding request that will eventually clean it up.
+  if (!knownGenerationIds.has(id)) return;
+
+  cancelledGenerations.add(id);
+  activeConversations.get(id)?.cancel();
+  if (mediaPipeGenerationIds.has(id)) {
+    mediaPipeEngine?.cancel();
+  }
+}
+
+async function dispatchRequest(data: Exclude<LiteRtLmWorkerRequest, { type: 'cancel' }>): Promise<void> {
   try {
     switch (data.type) {
       case 'load':
@@ -263,24 +263,29 @@ worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
         emit({ type: 'ready' });
         break;
       case 'generate':
-        if (activeEngine === 'mediapipe') {
-          await enqueueMediaPipeGeneration(data.id, data.prompt);
-        } else {
-          await generateLiteRtLm(data.id, data.prompt, data.config);
-        }
-        break;
-      case 'cancel':
-        if (activeEngine === 'mediapipe') {
-          cancelledGenerations.add(data.id);
-          if (mediaPipeGenerationIds.has(data.id)) {
-            mediaPipeEngine?.cancel();
+        try {
+          if (cancelledGenerations.has(data.id)) return;
+
+          if (activeEngine === 'mediapipe') {
+            if (hasGenerationConfig(data.config)) {
+              throw new Error(
+                'Per-generation config is not supported by the MediaPipe worker engine; set MediaPipe sampling/context options during load() instead',
+              );
+            }
+            await generateMediaPipe(data.id, data.prompt);
+          } else {
+            await generateLiteRtLm(data.id, data.prompt, data.config);
           }
-        } else {
-          activeConversations.get(data.id)?.cancel();
+        } catch (error) {
+          // Caller-triggered abort has already rejected the public client
+          // promise. Do not emit a second failure for the same request.
+          if (!cancelledGenerations.has(data.id)) throw error;
+        } finally {
+          knownGenerationIds.delete(data.id);
+          cancelledGenerations.delete(data.id);
         }
         break;
       case 'dispose':
-        for (const id of mediaPipeGenerationIds) cancelledGenerations.add(id);
         await disposeLoadedEngine();
         emit({ type: 'disposed' });
         break;
@@ -292,4 +297,27 @@ worker.onmessage = async (event: MessageEvent<LiteRtLmWorkerRequest>) => {
       message: error instanceof Error ? error.message : String(error),
     });
   }
+}
+
+worker.onmessage = (event: MessageEvent<LiteRtLmWorkerRequest>) => {
+  const data = event.data;
+
+  // Cancellation is deliberately outside the serialized dispatch queue so an
+  // active decode can be interrupted immediately.
+  if (data.type === 'cancel') {
+    cancelGeneration(data.id);
+    return;
+  }
+
+  if (data.type === 'generate') {
+    knownGenerationIds.add(data.id);
+  }
+
+  const task = dispatchQueue
+    .catch(() => undefined)
+    .then(() => dispatchRequest(data));
+  dispatchQueue = task.then(
+    () => undefined,
+    () => undefined,
+  );
 };

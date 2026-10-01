@@ -130,6 +130,10 @@ export class MediaPipeMultimodalEngine {
     const query = prompt.map((part) => {
       if (part.type === 'text') return part.text;
 
+      // @mediapipe/tasks-genai 0.10.29 explicitly accepts string
+      // ImageSource/AudioSource values and dereferences them internally. A
+      // scoped object URL therefore preserves Blob streaming without another
+      // full media-buffer copy; cleanup happens after generateResponse settles.
       const url = this.createObjectURL(part.data);
       objectUrls.push(url);
 

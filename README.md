@@ -53,7 +53,7 @@ because the page was opened.
 
 ### Lil Tart guide
 
-The Tart mascot is bound to real runtime state rather than a separate fake assistant
+The Tart mascot is bound to real runtime state rather than a separate assistant layer
 state machine. It reacts to model selection, download/compile progress, backend
 resolution, fallback events, preflight, real inference, and runtime errors.
 
@@ -188,6 +188,21 @@ pnpm dev
 ```
 
 The development command starts Lil Tart from `apps/playground`.
+
+### MediaPipe worker engine
+
+`@litert-playground/text-gen` also exposes a shared worker surface with an
+explicit `mediapipe` engine for structured text/image/audio prompts. The
+worker's `advertisedEngines` list is a build-time statement only; consumers
+must treat a successful `load()` as the runtime availability check for the
+chosen browser, model, WebGPU environment, and host policy.
+
+By default, the MediaPipe engine resolves its pinned `@mediapipe/tasks-genai`
+WASM files from jsDelivr. Offline, air-gapped, or strict-CSP consumers should
+self-host those WASM assets and pass their own `mediaPipe.wasmBaseUrl` during
+`load()`. Sampling/context options supported by MediaPipe are likewise set at
+load time; the worker rejects per-generation config rather than silently
+dropping unsupported caller intent.
 
 Before merging runtime or package changes, run:
 

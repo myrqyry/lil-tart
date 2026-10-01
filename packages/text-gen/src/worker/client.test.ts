@@ -21,8 +21,8 @@ class FakeWorker {
 }
 
 describe('LiteRtLmWorkerClient', () => {
-  it('advertises the additive multimodal capability explicitly', () => {
-    expect(LiteRtLmWorkerClient.capabilities.mediaPipeMultimodal).toBe(true);
+  it('advertises compiled worker engines without claiming runtime availability', () => {
+    expect(LiteRtLmWorkerClient.advertisedEngines).toEqual(['litert-lm', 'mediapipe']);
   });
 
   it('passes explicit MediaPipe load options through without changing text callers', async () => {
@@ -73,7 +73,7 @@ describe('LiteRtLmWorkerClient', () => {
     await second;
   });
 
-  it('deduplicates only concurrent load callers', async () => {
+  it('deduplicates only identical concurrent load callers', async () => {
     const worker = new FakeWorker();
     const client = new LiteRtLmWorkerClient(() => worker);
 
@@ -83,6 +83,49 @@ describe('LiteRtLmWorkerClient', () => {
     expect(worker.messages).toHaveLength(1);
     worker.emit({ type: 'ready' });
     await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+  });
+
+  it('rejects a conflicting concurrent load instead of pretending the first model satisfies it', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+
+    const first = client.load('first.litertlm');
+    await expect(
+      client.load('second.task', { engine: 'mediapipe' }),
+    ).rejects.toThrow('different worker model or engine is already loading');
+
+    expect(worker.messages).toHaveLength(1);
+    worker.emit({ type: 'ready' });
+    await first;
+  });
+
+  it('rejects operations after disposal instead of posting to a terminated worker', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+    client.dispose();
+
+    await expect(client.load('model.task')).rejects.toThrow('worker client is disposed');
+    await expect(client.generate('hello', vi.fn())).rejects.toThrow('worker client is disposed');
+    expect(worker.terminate).toHaveBeenCalledTimes(1);
+    expect(worker.messages).toEqual([{ type: 'dispose' }]);
+  });
+
+  it('uses distinct disposal errors for independent pending generations', async () => {
+    const worker = new FakeWorker();
+    const client = new LiteRtLmWorkerClient(() => worker);
+    const first = client.generate('one', vi.fn());
+    const second = client.generate('two', vi.fn());
+
+    client.dispose();
+
+    const [firstResult, secondResult] = await Promise.allSettled([first, second]);
+    expect(firstResult.status).toBe('rejected');
+    expect(secondResult.status).toBe('rejected');
+    if (firstResult.status === 'rejected' && secondResult.status === 'rejected') {
+      expect(firstResult.reason).not.toBe(secondResult.reason);
+      expect(firstResult.reason.message).toContain('generation 1');
+      expect(secondResult.reason.message).toContain('generation 2');
+    }
   });
 
   it('structured-clones multimodal prompt parts through the worker protocol', async () => {
