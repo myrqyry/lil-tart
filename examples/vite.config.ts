@@ -7,7 +7,7 @@ import type { Connect, Plugin } from 'vite'
 import {
   QWEN3_TTS_UPSTREAM_REPOSITORY,
   QWEN3_TTS_UPSTREAM_REVISION,
-} from '../packages/qwen3-tts/src/manifest'
+} from '@litert-playground/qwen3-tts/provenance'
 
 const root = path.resolve(__dirname, '..')
 const modelPrefix = '/models/qwen3-tts/'

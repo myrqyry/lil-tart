@@ -106,7 +106,7 @@ export function createModelLibraryAssetResolver(base: string): AssetResolver {
       try {
         await cache.put(
           key,
-          new Response(fresh.slice(0), {
+          new Response(fresh, {
             headers: {
               'content-type': asset.mimeType ?? 'application/octet-stream',
               'x-lil-tart-bytes': String(fresh.byteLength),

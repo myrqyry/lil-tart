@@ -1,7 +1,13 @@
 import { type ModelAsset, type ModelManifest } from '@litert-playground/inference-core'
-
-export const QWEN3_TTS_UPSTREAM_REPOSITORY = 'litert-community/Qwen3-TTS-12Hz-0.6B-Base'
-export const QWEN3_TTS_UPSTREAM_REVISION = '528cca7d2ddf6f5c1e1127f24a7f8786f80fa6e8'
+import {
+  QWEN3_TTS_UPSTREAM_REPOSITORY,
+  QWEN3_TTS_UPSTREAM_REVISION,
+} from './provenance'
+export {
+  QWEN3_TTS_UPSTREAM_REPOSITORY,
+  QWEN3_TTS_UPSTREAM_REVISION,
+  QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES,
+} from './provenance'
 
 interface PublishedAsset {
   bytes: number

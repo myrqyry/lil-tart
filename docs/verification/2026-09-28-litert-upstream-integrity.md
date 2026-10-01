@@ -30,9 +30,15 @@ path's checksum. In particular, a configured voice other than
 its own manifest facts.
 
 Both Qwen execution paths now use manifest verification: the direct playground
-path and the generator/decoder worker contexts. The local experimental
-`mtp_folded_int8.tflite` keeps its known byte size but deliberately has no
-invented checksum.
+path and the generator/decoder worker contexts. Browser execution sets a 64 MiB
+in-memory SHA-256 ceiling because Web Crypto's digest API requires a complete
+contiguous buffer. Assets above that ceiling still enforce their declared byte
+length but do not allocate another full-model digest input; streamed large
+assets remain streaming and are length-checked as chunks pass through. Small
+tokenizer/table/voice assets continue to receive SHA-256 verification. The
+playground also uses the `browserMemory` Qwen variant instead of the fp32
+pipeline default. The local experimental `mtp_folded_int8.tflite` keeps its
+known byte size but deliberately has no invented checksum.
 
 The `browserMemoryOmni` qualification variant is mixed-source: its
 `mtp_fp32.tflite` comes from
@@ -42,9 +48,11 @@ SHA-256 are therefore recorded separately from the base repository's
 same-named 440,526,692-byte MTP artifact.
 
 The runnable example model proxy also resolves the exported
-`QWEN3_TTS_UPSTREAM_REVISION` rather than mutable `main`. The pinned revision
-contains the folded browser-memory MTP as well as the published base assets, so
-pinning the proxy does not break the minimal browser-memory example.
+`QWEN3_TTS_UPSTREAM_REVISION` rather than mutable `main`, and the shared Vite
+config consumes those constants through the public `@litert-playground/qwen3-tts`
+entrypoint. The pinned revision contains the folded browser-memory MTP as well
+as the published base assets, so pinning the proxy does not break the minimal
+browser-memory example.
 
 ## LiteRT-LM source pinning
 

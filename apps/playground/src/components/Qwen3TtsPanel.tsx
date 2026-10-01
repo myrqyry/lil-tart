@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Qwen3TtsPipeline, qwen3TtsManifest, type QwenTtsConfig } from '@litert-playground/qwen3-tts'
+import {
+  Qwen3TtsPipeline,
+  QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES,
+  qwen3TtsVariants,
+  type QwenTtsConfig,
+} from '@litert-playground/qwen3-tts'
 import { createLiteRtRuntime, type ManagedLiteRtRuntimeContext } from '@litert-playground/runtime-litert'
 import { createModelLibraryAssetResolver, registerModelAssets } from '../modelStorage'
 import { createManifestVerifyingAssetResolver, type PipelineProgress } from '@litert-playground/inference-core'
@@ -50,9 +55,11 @@ export function Qwen3TtsPanel() {
 
     try {
       await disposePipeline()
-      registerModelAssets(qwen3TtsManifest.modelId, qwen3TtsManifest.assets.map((asset) => asset.path))
 
-      const p = new Qwen3TtsPipeline()
+      // The playground is a browser path, so prefer the reduced-memory graph
+      // set rather than the pipeline's fidelity-oriented fp32 default.
+      const p = new Qwen3TtsPipeline(qwen3TtsVariants.browserMemory)
+      registerModelAssets(p.manifest.modelId, p.manifest.assets.map((asset) => asset.path))
       p.onProgress = (pr: PipelineProgress) => {
         setProgress(`${pr.phase} ${pr.step}/${pr.total}`)
       }
@@ -62,6 +69,7 @@ export function Qwen3TtsPanel() {
         assets: createManifestVerifyingAssetResolver(
           p.manifest,
           createModelLibraryAssetResolver('/models/qwen3-tts/'),
+          { maxSha256Bytes: QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES },
         ),
       })
       ctxRef.current = ctx

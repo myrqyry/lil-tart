@@ -7,6 +7,7 @@ import {
   type ModelManifest,
 } from '@litert-playground/inference-core';
 import { GeneratorPhase } from '../phases/generator';
+import { QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES } from '../manifest';
 import type { GeneratorWorkerRequest, GeneratorWorkerResponse } from './protocol';
 import { serializeError } from './protocol';
 
@@ -14,7 +15,9 @@ let phase: GeneratorPhase | undefined;
 
 async function buildContext(modelBase: string, manifest: ModelManifest) {
   const inner = createCachingAssetResolver(createHttpAssetResolver(modelBase));
-  const assets = createManifestVerifyingAssetResolver(manifest, inner);
+  const assets = createManifestVerifyingAssetResolver(manifest, inner, {
+    maxSha256Bytes: QWEN3_TTS_MAX_IN_MEMORY_SHA256_BYTES,
+  });
   return createLiteRtRuntime({ assets });
 }
 

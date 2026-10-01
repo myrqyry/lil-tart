@@ -113,6 +113,67 @@ describe('manifest-verifying asset resolver', () => {
     ).resolves.toEqual(bytes)
   })
 
+  it('can skip SHA-256 above an explicit in-memory ceiling while preserving byte checks', async () => {
+    const verifying = createManifestVerifyingAssetResolver(
+      {
+        ...manifest,
+        assets: [{ id: 'model', path: 'model.bin', bytes: 3, sha256: '00'.repeat(32) }],
+      },
+      resolver(),
+      { maxSha256Bytes: 2 },
+    )
+
+    await expect(verifying.resolve({ id: 'model', path: 'model.bin' })).resolves.toEqual(bytes)
+  })
+
+  it('keeps streamed large assets streaming when SHA-256 is above the ceiling', async () => {
+    const inner = resolver({
+      stream: vi.fn().mockResolvedValue(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1]))
+            controller.enqueue(new Uint8Array([2, 3]))
+            controller.close()
+          },
+        }),
+      ),
+    })
+    const verifying = createManifestVerifyingAssetResolver(
+      {
+        ...manifest,
+        assets: [{ id: 'model', path: 'model.bin', bytes: 3, sha256: '00'.repeat(32) }],
+      },
+      inner,
+      { maxSha256Bytes: 2 },
+    )
+
+    await expect(readStream(await verifying.stream!({ id: 'model', path: 'model.bin' }))).resolves.toEqual(bytes)
+  })
+
+  it('rejects streamed byte-length mismatches even when large-asset SHA-256 is skipped', async () => {
+    const inner = resolver({
+      stream: vi.fn().mockResolvedValue(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array([1, 2]))
+            controller.close()
+          },
+        }),
+      ),
+    })
+    const verifying = createManifestVerifyingAssetResolver(
+      {
+        ...manifest,
+        assets: [{ id: 'model', path: 'model.bin', bytes: 3, sha256: '00'.repeat(32) }],
+      },
+      inner,
+      { maxSha256Bytes: 2 },
+    )
+
+    await expect(readStream(await verifying.stream!({ id: 'model', path: 'model.bin' })))
+      .rejects.toMatchObject({ code: 'ASSET_INTEGRITY_FAILED', asset: 'model' })
+  })
+
   it('does not require absent verification facts', async () => {
     await expect(
       createManifestVerifyingAssetResolver(manifest, resolver()).resolve({ id: 'model', path: 'model.bin' }),

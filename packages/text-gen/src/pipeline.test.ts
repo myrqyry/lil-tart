@@ -181,7 +181,7 @@ describe("LiteRtLmTextPipeline", () => {
           { role: "assistant", content: "yo" },
         ],
       },
-      { model: "litert-community/Qwen3-0.6B/resolve/main/Qwen3-0.6B.litertlm" }
+      { model: litertLmManifest.assets[0].path }
     );
 
     expect(result.kind).toBe("text");
@@ -808,6 +808,16 @@ describe("LiteRtLmTextPipeline", () => {
 });
 
 describe("pinned LiteRT-LM model artifacts", () => {
+  it("uses the pinned Qwen manifest path for the default pipeline", async () => {
+    const p = new LiteRtLmTextPipeline()
+    await p.load(fakeContext())
+
+    expect(mockEngineCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ model: litertLmManifest.assets[0].path }),
+    )
+    expect(litertLmManifest.assets[0].path).not.toContain('/resolve/main/')
+  })
+
   it("uses immutable Hugging Face revisions with exact integrity metadata", () => {
     for (const manifest of [
       litertLmManifest,
