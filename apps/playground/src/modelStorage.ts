@@ -1,4 +1,5 @@
 import {
+  InferenceError,
   createHttpAssetResolver,
   createManifestVerifyingAssetResolver,
   type AssetIntegrityVerificationOptions,
@@ -122,18 +123,36 @@ export function createModelLibraryAssetResolver(
     let cache: Cache | null = null
     try {
       cache = await storage.open(CACHE_NAME)
-      const cached = await cache.match(key)
+    } catch {
+      cache = null
+    }
+
+    if (cache) {
+      let cached: Response | undefined
+      try {
+        cached = await cache.match(key)
+      } catch {
+        cache = null
+      }
+
       if (cached) {
         try {
           return await verifyCached(asset, await cached.arrayBuffer())
-        } catch {
-          // A bad persisted entry must not poison every retry. Remove it and
-          // fall through to a fresh verified fetch.
-          await cache.delete(key)
+        } catch (error) {
+          if (!(error instanceof InferenceError) || error.code !== 'ASSET_INTEGRITY_FAILED') {
+            throw error
+          }
+
+          // Only an actual integrity verdict proves this persisted entry is
+          // poisoned. Eviction failure degrades persistence, not the verified
+          // fresh-fetch path below.
+          try {
+            await cache?.delete(key)
+          } catch {
+            cache = null
+          }
         }
       }
-    } catch {
-      cache = null
     }
 
     // Integrity-aware callers verify fresh bytes before they are persisted.

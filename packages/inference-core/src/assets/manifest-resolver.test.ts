@@ -174,16 +174,14 @@ describe('manifest-verifying asset resolver', () => {
       .rejects.toMatchObject({ code: 'ASSET_INTEGRITY_FAILED', asset: 'model' })
   })
 
-  it('cancels unknown-size SHA streams as soon as the in-memory ceiling is exceeded', async () => {
+  it('keeps unknown-size SHA streams streaming when a buffer ceiling is configured', async () => {
     const cancel = vi.fn()
-    let sent = false
     const inner = resolver({
       stream: vi.fn().mockResolvedValue(
         new ReadableStream({
-          pull(controller) {
-            if (sent) return
-            sent = true
+          start(controller) {
             controller.enqueue(new Uint8Array([1, 2, 3]))
+            controller.close()
           },
           cancel,
         }),
@@ -198,9 +196,9 @@ describe('manifest-verifying asset resolver', () => {
       { maxSha256Bytes: 2 },
     )
 
-    await expect(verifying.stream!({ id: 'model', path: 'model.bin' }))
-      .rejects.toMatchObject({ code: 'ASSET_INTEGRITY_FAILED', asset: 'model' })
-    expect(cancel).toHaveBeenCalled()
+    const streamed = await verifying.stream!({ id: 'model', path: 'model.bin' })
+    await expect(readStream(streamed)).resolves.toEqual(new Uint8Array([1, 2, 3]).buffer)
+    expect(cancel).not.toHaveBeenCalled()
   })
 
   it('cancels SHA buffering as soon as streamed bytes exceed the declared length', async () => {

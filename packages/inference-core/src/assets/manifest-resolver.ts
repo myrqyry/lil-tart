@@ -30,7 +30,10 @@ function shouldVerifySha256(
   const max = options.maxSha256Bytes
   if (max === undefined) return true
   const bytes = asset.bytes ?? actualBytes
-  return bytes === undefined || bytes <= max
+  // A streamed asset with unknown length cannot be safely whole-buffer hashed
+  // under a memory ceiling because the decision would arrive only after the
+  // ceiling had already been crossed. Keep it streaming/unverified instead.
+  return bytes !== undefined && bytes <= max
 }
 
 function bytesFromStream(
