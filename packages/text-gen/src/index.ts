@@ -28,4 +28,10 @@ export type {
   TextGenPreference,
 } from './manifest'
 export type { TransformersTextConfig } from './transformers-pipeline'
-export type { LiteRtLmTextConfig, LiteRtLmTextPipelineOptions } from './litertlm-pipeline'
+export type {
+  LiteRtLmBackend,
+  LiteRtLmModelSource,
+  LiteRtLmTextConfig,
+  LiteRtLmTextPipelineOptions,
+  LiteRtLmToolCall,
+} from './litertlm-pipeline'

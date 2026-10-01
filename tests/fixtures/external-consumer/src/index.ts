@@ -16,6 +16,14 @@ export const textPipelineOptions: LiteRtLmTextPipelineOptions = {
   modelBase: 'https://huggingface.co/',
 }
 
+// The lightweight downstream loader is part of the supported public surface:
+// consumers with their own model cache only need to provide the execution backend.
+export async function loadCachedTextModel(model: Blob): Promise<void> {
+  const pipeline = new LiteRtLmTextPipeline('gemma-4-e2b-it', { model })
+  await pipeline.loadForBackend('webgpu')
+  await pipeline.dispose()
+}
+
 export const importedPackages = [
   InferenceError,
   createHttpAssetResolver,
