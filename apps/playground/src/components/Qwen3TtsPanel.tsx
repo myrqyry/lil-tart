@@ -11,6 +11,18 @@ import { type PipelineProgress } from '@litert-playground/inference-core'
 
 let pipeline: Qwen3TtsPipeline | null = null
 
+type PlaygroundQwenVariant = 'fp32' | 'int4' | 'browserMemory' | 'browserMemoryOmni'
+
+const PLAYGROUND_QWEN_VARIANTS: Array<{
+  id: PlaygroundQwenVariant
+  label: string
+}> = [
+  { id: 'fp32', label: 'FP32 (published default)' },
+  { id: 'int4', label: 'INT4 talker / FP32 auxiliaries' },
+  { id: 'browserMemory', label: 'Browser-memory (experimental)' },
+  { id: 'browserMemoryOmni', label: 'Browser-memory Omni MTP (qualification)' },
+]
+
 export function Qwen3TtsPanel() {
   const [text, setText] = useState('Hello, welcome to my world.')
   const [generating, setGenerating] = useState(false)
@@ -18,6 +30,7 @@ export function Qwen3TtsPanel() {
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [status, setStatus] = useState('Not loaded')
   const [error, setError] = useState<string | null>(null)
+  const [variantId, setVariantId] = useState<PlaygroundQwenVariant>('fp32')
   const [cfg, setCfg] = useState<QwenTtsConfig>({
     temperature: 0.85,
     topK: 25,
@@ -56,9 +69,7 @@ export function Qwen3TtsPanel() {
     try {
       await disposePipeline()
 
-      // The playground is a browser path, so prefer the reduced-memory graph
-      // set rather than the pipeline's fidelity-oriented fp32 default.
-      const p = new Qwen3TtsPipeline(qwen3TtsVariants.browserMemory)
+      const p = new Qwen3TtsPipeline(qwen3TtsVariants[variantId])
       registerModelAssets(p.manifest.modelId, p.manifest.assets.map((asset) => asset.path))
       p.onProgress = (pr: PipelineProgress) => {
         setProgress(`${pr.phase} ${pr.step}/${pr.total}`)
@@ -118,7 +129,18 @@ export function Qwen3TtsPanel() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-sm text-on-surface-variant">Status: {status}</div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <select
+            aria-label="Qwen3-TTS graph set"
+            className="rounded-lg border border-outline bg-surface-container px-2 py-1 text-xs text-on-surface"
+            value={variantId}
+            disabled={status === 'Loading...' || status === 'Ready'}
+            onChange={e => setVariantId(e.target.value as PlaygroundQwenVariant)}
+          >
+            {PLAYGROUND_QWEN_VARIANTS.map(variant => (
+              <option key={variant.id} value={variant.id}>{variant.label}</option>
+            ))}
+          </select>
           <select
             className="rounded-lg border border-outline bg-surface-container px-2 py-1 text-xs text-on-surface"
             value={cfg.language}
@@ -166,6 +188,9 @@ export function Qwen3TtsPanel() {
         )}
         <p className="self-center text-[11px] text-on-surface-variant">
           Model assets are only fetched when inference actually needs them.
+          {variantId === 'browserMemory'
+            ? ' The browser-memory graph set is experimental and uses mtp_folded_int8.tflite.'
+            : ''}
         </p>
       </div>
 

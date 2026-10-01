@@ -30,15 +30,20 @@ path's checksum. In particular, a configured voice other than
 its own manifest facts.
 
 Both Qwen execution paths now use manifest verification: the direct playground
-path and the generator/decoder worker contexts. Browser execution sets a 64 MiB
-in-memory SHA-256 ceiling because Web Crypto's digest API requires a complete
-contiguous buffer. Assets above that ceiling still enforce their declared byte
-length but do not allocate another full-model digest input; streamed large
-assets remain streaming and are length-checked as chunks pass through. Small
-tokenizer/table/voice assets continue to receive SHA-256 verification. The
-playground also uses the `browserMemory` Qwen variant instead of the fp32
-pipeline default. The local experimental `mtp_folded_int8.tflite` keeps its
-known byte size but deliberately has no invented checksum.
+path and the generator/decoder worker contexts. The main-thread playground path
+sets a 64 MiB in-memory SHA-256 ceiling because Web Crypto's digest API requires
+a complete contiguous buffer. Assets above that ceiling still enforce their
+declared byte length but do not allocate another full-model digest input;
+streamed large assets remain streaming and are length-checked as chunks pass
+through. The dedicated generator/decoder workers do **not** use that ceiling:
+published assets with SHA-256 facts remain strictly hashed there, away from the
+UI thread.
+
+The playground exposes the graph set explicitly and defaults to the published
+`fp32` variant. The reduced-memory `browserMemory` variant is labeled
+experimental because it swaps in `talker_int4.tflite` and the local
+`mtp_folded_int8.tflite`; that folded MTP keeps its known byte size but
+deliberately has no invented checksum.
 
 The `browserMemoryOmni` qualification variant is mixed-source: its
 `mtp_fp32.tflite` comes from
