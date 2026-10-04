@@ -238,11 +238,17 @@ qualification is a separate evidence-producing step; see [Verification philosoph
 | `pnpm test` | Run tests in all workspace projects |
 | `pnpm test:boundaries` | Verify package dependency and architecture boundaries |
 | `pnpm test:compatibility` | Pack and consume the supported external package surface |
+| `pnpm test:conversion-assets` | Validate pinned conversion recipes and candidate-evidence boundaries |
 | `pnpm test:qualification` | Run deterministic runtime-qualification contract tests |
 | `pnpm qualify` | Run real browser qualification cases and write evidence results |
 | `pnpm test:watch` | Watch-mode tests for the playground |
 | `pnpm typecheck` | Type-check all workspace projects |
-| `pnpm verify` | Typecheck + tests + boundary + compatibility + qualification-contract tests + production builds |
+| `pnpm verify` | Typecheck + tests + boundaries + compatibility + conversion assets + qualification contracts + builds |
+
+Conversion inputs and candidate evidence live under `conversion/`. Android
+CompiledModel observations can guide what Lil Tart tries next, but they do not
+promote browser verification metadata; browser claims still require Lil Tart's
+own recorded qualification evidence.
 
 GitHub Actions runs the deterministic `pnpm verify` gate for pull requests. The
 `Runtime qualification` workflow runs `pnpm qualify` on demand and uploads its

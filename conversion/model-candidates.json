@@ -1,0 +1,104 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "john-rocky/LiteRT-Models",
+    "revision": "460d52221c22388b6a9a8e8a44b61dde72976b4e",
+    "reviewedAt": "2026-09-30"
+  },
+  "candidates": [
+    {
+      "id": "falcon3-3b-instruct-litertlm",
+      "task": "text-generation",
+      "targetPackage": "text-gen",
+      "artifactKind": "litertlm",
+      "upstreamPath": "text-generation/",
+      "conversion": "int4 block128",
+      "upstreamEvidence": "Converted with official litert-torch export_hf",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "llama-3.2-3b-instruct-litertlm",
+      "task": "text-generation",
+      "targetPackage": "text-gen",
+      "artifactKind": "litertlm",
+      "upstreamPath": "text-generation/",
+      "conversion": "int4 block32 with externalized embedder",
+      "upstreamEvidence": "Converted with official litert-torch export_hf",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "ministral-3-3b-instruct-litertlm",
+      "task": "text-generation",
+      "targetPackage": "text-gen",
+      "artifactKind": "litertlm",
+      "upstreamPath": "text-generation/",
+      "conversion": "int4 block32 + OCTAV with externalized embedder",
+      "upstreamEvidence": "Converted text decoder with official litert-torch export_hf",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "smollm3-3b-litertlm",
+      "task": "text-generation",
+      "targetPackage": "text-gen",
+      "artifactKind": "litertlm",
+      "upstreamPath": "text-generation/",
+      "conversion": "int4 block32 + OCTAV with externalized embedder",
+      "upstreamEvidence": "Converted with official litert-torch export_hf",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "smolvlm-256m",
+      "task": "vision-language",
+      "targetPackage": "future-vision-language",
+      "artifactKind": "tflite+onnx",
+      "upstreamPath": "smolvlm/",
+      "upstreamEvidence": "LiteRT GPU vision encoder + ONNX CPU language model on Android",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "parakeet-tdt-ctc-110m",
+      "task": "speech-recognition",
+      "targetPackage": "future-asr",
+      "artifactKind": "tflite",
+      "upstreamPath": "README.md#parakeet-fastconformer-ctc",
+      "upstreamEvidence": "Pixel 8a: ~0.4 s per 16 s window",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "basic-pitch",
+      "task": "audio-to-midi",
+      "targetPackage": "future-audio",
+      "artifactKind": "tflite",
+      "upstreamPath": "basicpitch/",
+      "upstreamEvidence": "Pixel 8a: ~4.4 ms per 2 s window",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "rtmpose-s",
+      "task": "pose-estimation",
+      "targetPackage": "future-vision",
+      "artifactKind": "tflite",
+      "upstreamPath": "README.md#rtmpose-s",
+      "upstreamEvidence": "Pixel 8a: ~4 ms",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "metric3d-v2-vit-s",
+      "task": "depth-estimation",
+      "targetPackage": "future-vision",
+      "artifactKind": "tflite",
+      "upstreamPath": "README.md#metric3d-v2-vit-s",
+      "upstreamEvidence": "Pixel 8a: ~44 ms",
+      "browserQualification": "unverified"
+    },
+    {
+      "id": "pp-ocrv5",
+      "task": "ocr",
+      "targetPackage": "future-vision",
+      "artifactKind": "tflite",
+      "upstreamPath": "README.md#pp-ocrv5",
+      "upstreamEvidence": "Pixel 8a: ~9 ms detector + ~9 ms recognizer",
+      "browserQualification": "unverified"
+    }
+  ]
+}

@@ -73,9 +73,10 @@ Where authority lives (do not duplicate these):
 
 | Command | Meaning |
 | --- | --- |
-| `pnpm verify` | CI gate: typecheck + test + boundaries + compatibility + qualification + build |
+| `pnpm verify` | CI gate: typecheck + test + boundaries + compatibility + conversion assets + qualification + build |
 | `pnpm test:boundaries` | Package dependency rules (examples → public entrypoints, inference-core independence, playground → runtime-litert) |
 | `pnpm test:compatibility` | Pack and consume the supported external surface |
+| `pnpm test:conversion-assets` | Validate pinned conversion recipes and candidate-evidence boundaries |
 | `pnpm test:qualification` | Runtime qualification suite (separate vitest config, Node env) |
 | `pnpm --filter <pkg> test` / `typecheck` | Single-package work |
 | `pnpm dev` | Playground dev server |
