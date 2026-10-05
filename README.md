@@ -11,7 +11,7 @@
 ░    ░    ░  ░    ░                     ░     ░              
 ```
 
-A local-first model launcher, runtime qualification lab, and reusable LiteRT.js workspace.
+A local-first model substrate, launcher, runtime qualification lab, and reusable LiteRT.js workspace.
 
 Lil Tart is the interactive browser app in `apps/playground`. The repository still
 uses the `@litert-playground/*` package namespace underneath it, because the app and
