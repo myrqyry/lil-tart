@@ -44,6 +44,19 @@ export interface QualificationError {
   message: string
 }
 
+export interface QualificationNumericComparison {
+  reference: string
+  candidate: string
+  elementCount: number
+  nonFiniteCount: number
+  failingElements: number
+  maxAbsDiff: number
+  maxRelDiff: number
+  atol: number
+  rtol: number
+  passed: boolean
+}
+
 export interface QualificationObservation {
   status: QualificationStatus
   limitation?: QualificationLimitation
@@ -52,6 +65,7 @@ export interface QualificationObservation {
   diagnostics?: InferenceDiagnostics
   error?: QualificationError
   receipts?: GeneratorTraceEvent[]
+  numericComparison?: QualificationNumericComparison
 }
 
 export interface QualificationContext {

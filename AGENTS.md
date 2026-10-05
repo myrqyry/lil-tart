@@ -11,14 +11,15 @@ pnpm monorepo for LiteRT.js browser inference. Node 22+, pnpm 11+.
 | `pnpm build` | Build all projects |
 | `pnpm typecheck` | Type-check every package |
 | `pnpm test` | Run all package tests |
-| `pnpm verify` | **CI gate**: typecheck + test + boundary + compatibility + qualification + build |
+| `pnpm verify` | **CI gate**: typecheck + test + boundaries + compatibility + conversion assets + qualification + build |
 | `pnpm test:boundaries` | Enforce package dependency rules (examples → public entrypoints, inference-core independent, playground → runtime-litert) |
 | `pnpm test:compatibility` | Pack/consume the supported external surface |
+| `pnpm test:conversion-assets` | Validate pinned conversion recipes and candidate-evidence boundaries |
 | `pnpm test:qualification` | Runtime qualification suite (Node env, separate vitest config) |
 | `pnpm --filter <pkg> test` | Single-package tests |
 | `pnpm --filter <pkg> typecheck` | Single-package typecheck |
 
-`pnpm verify` is the authoritative pre-merge check. Do not skip boundary or qualification tests.
+`pnpm verify` is the authoritative pre-merge check. Do not skip boundary, conversion-asset, or qualification tests.
 
 ## Package layout
 

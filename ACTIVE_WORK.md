@@ -49,6 +49,30 @@ Final combined validation and delivery are recorded in the follow-up report.
 - Detailed validation and remaining limitations:
   `docs/verification/2026-09-28-pr10-followup.md`.
 
+## Current continuation — conversion qualification forward-port — 2026-10-05
+
+The old `aster/litert-upstream-hardening` branch was 115 commits behind current
+`master`, while its provenance and MediaPipe work had already landed separately.
+The branch is being rebuilt from current `master` with only the still-distinct
+conversion/qualification work preserved.
+
+- Add a pinned conversion-evidence lane sourced from
+  `john-rocky/LiteRT-Models@460d52221c22388b6a9a8e8a44b61dde72976b4e`.
+- Keep Android conversion/delegate evidence separate from Lil Tart browser
+  qualification; candidate models remain browser-unverified until observed here.
+- Add numeric-parity evidence to qualification results so compile/run success
+  cannot silently stand in for output correctness.
+- Add deterministic conversion-asset validation to the authoritative
+  `pnpm verify` gate.
+- Preserve current master runtime/provenance/MediaPipe implementations rather
+  than replaying their older copies from this historical branch.
+
+Fresh verification against the rebuilt tree is established: `pnpm test:conversion-assets`
+passes for 10 candidates and 2 pinned recipes; the qualification suite passes
+69/69 tests; and full `pnpm verify` exits 0 across typecheck, package/app tests,
+15/15 boundary tests, all 10 packed-consumer compatibility rows, conversion
+validation, qualification, and production builds.
+
 ## Historical notes through `a3dfeb4`
 
 Retained for decision history. Statements below about dirty state, branch distance,

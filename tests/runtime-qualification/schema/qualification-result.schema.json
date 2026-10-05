@@ -108,9 +108,38 @@
         "stage": { "type": "string" },
         "resolvedBackend": { "enum": ["wasm", "webgpu"] },
         "diagnostics": { "type": "object", "additionalProperties": true },
-        "error": { "$ref": "#/$defs/error" }
+        "error": { "$ref": "#/$defs/error" },
+        "numericComparison": { "$ref": "#/$defs/numericComparison" }
       },
       "additionalProperties": true
+    },
+    "numericComparison": {
+      "type": "object",
+      "required": [
+        "reference",
+        "candidate",
+        "elementCount",
+        "nonFiniteCount",
+        "failingElements",
+        "maxAbsDiff",
+        "maxRelDiff",
+        "atol",
+        "rtol",
+        "passed"
+      ],
+      "properties": {
+        "reference": { "type": "string", "minLength": 1 },
+        "candidate": { "type": "string", "minLength": 1 },
+        "elementCount": { "type": "integer", "minimum": 0 },
+        "nonFiniteCount": { "type": "integer", "minimum": 0 },
+        "failingElements": { "type": "integer", "minimum": 0 },
+        "maxAbsDiff": { "type": "number", "minimum": 0 },
+        "maxRelDiff": { "type": "number", "minimum": 0 },
+        "atol": { "type": "number", "minimum": 0 },
+        "rtol": { "type": "number", "minimum": 0 },
+        "passed": { "type": "boolean" }
+      },
+      "additionalProperties": false
     }
   }
 }

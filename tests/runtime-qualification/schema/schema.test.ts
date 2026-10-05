@@ -33,6 +33,15 @@ describe('qualification result schema', () => {
     expect(schema.$defs.observation.properties.limitation.enum).toContain('resource-exhausted')
   })
 
+  it('records numeric parity evidence for silent output corruption', () => {
+    expect(schema.$defs.observation.properties.numericComparison).toEqual({
+      $ref: '#/$defs/numericComparison',
+    })
+    expect(schema.$defs.numericComparison.required).toContain('nonFiniteCount')
+    expect(schema.$defs.numericComparison.required).toContain('maxAbsDiff')
+    expect(schema.$defs.numericComparison.required).toContain('passed')
+  })
+
   it('requires schema version one and a case identifier', () => {
     expect(schema.properties.schemaVersion).toEqual({ const: 1 })
     expect(schema.required).toContain('caseId')
