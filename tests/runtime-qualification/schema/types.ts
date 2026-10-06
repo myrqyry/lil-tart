@@ -199,6 +199,7 @@ export function matchQualificationExpectation(
   expected: QualificationCase['expected'],
   observed: QualificationObservation,
 ): boolean {
+  if (observed.numericComparison?.passed === false) return false
   if (expected.status === 'pass') return observed.status === 'pass'
   return observed.status === 'fail'
 }
@@ -209,5 +210,7 @@ export function mapQualificationStatus(
   if (result.evidenceKind !== 'browser-observation') {
     throw new Error('Manifest qualification requires browser observation evidence')
   }
-  return result.observed.status === 'pass' ? 'qualified' : 'limited'
+  return result.observed.status === 'pass' && result.observed.numericComparison?.passed !== false
+    ? 'qualified'
+    : 'limited'
 }

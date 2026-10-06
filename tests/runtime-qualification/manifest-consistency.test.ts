@@ -1,8 +1,24 @@
 import { describe, expect, it } from 'vitest'
 import { mapQualificationStatus } from './schema/types'
 import type { QualificationResult } from './schema/types'
+import { compareNumericOutputs } from './shared/numericParity'
 
 describe('qualification manifest mapping', () => {
+  it('does not promote failed numeric parity to a qualified manifest', () => {
+    const numericComparison = compareNumericOutputs([1], [3], {
+      referenceLabel: 'reference', candidateLabel: 'candidate', atol: 0, rtol: 0,
+    })
+    expect(mapQualificationStatus({
+      evidenceKind: 'browser-observation',
+      observed: { status: 'pass', numericComparison },
+    })).toBe('limited')
+    expect(mapQualificationStatus({
+      evidenceKind: 'browser-observation',
+      observed: { status: 'pass', numericComparison: compareNumericOutputs([1], [1], {
+        referenceLabel: 'reference', candidateLabel: 'candidate', atol: 0, rtol: 0,
+      }) },
+    })).toBe('qualified')
+  })
   it('maps passing and limited observations to manifest status', () => {
     expect(mapQualificationStatus({
       evidenceKind: 'browser-observation',

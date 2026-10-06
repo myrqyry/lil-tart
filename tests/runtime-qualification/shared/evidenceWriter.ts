@@ -29,6 +29,7 @@ export function matchQualificationExpectation(
   expected: QualificationCase['expected'],
   observed: QualificationObservation,
 ): boolean {
+  if (observed.numericComparison?.passed === false) return false
   if (expected.status === 'pass') return observed.status === 'pass'
   // ponytail: expected known-limitation accepts both the raw failure and a
   // promoted observation; everything else must match exactly.

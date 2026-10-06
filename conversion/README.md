@@ -11,6 +11,10 @@ Source material imported on 2026-09-30 is pinned to:
 
 The two LiteRT-LM recipes under `litert-lm/recipes/` are copied verbatim from that
 revision. They remain conversion inputs, not claims about any Lil Tart model.
+`pnpm test:conversion-assets` compares their complete parsed structures with
+that pin, including every option and the exact two-rule order, and tests
+that semantic mutations are rejected. JSON formatting and object key order
+do not affect this check.
 
 ## Qualification boundary
 

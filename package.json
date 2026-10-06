@@ -11,7 +11,7 @@
     "test": "pnpm -r --if-present test",
     "test:boundaries": "vitest run tests/package-boundaries.test.ts",
     "test:compatibility": "node scripts/package-compatibility.mjs",
-    "test:conversion-assets": "node scripts/validate-conversion-assets.mjs",
+    "test:conversion-assets": "node --test scripts/validate-conversion-assets.test.mjs && node scripts/validate-conversion-assets.mjs",
     "test:qualification": "vitest run --config tests/runtime-qualification/vitest.config.ts",
     "qualify": "tsx tests/runtime-qualification/run-qualification.ts",
     "test:watch": "pnpm --filter playground test:watch",

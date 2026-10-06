@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { deepStrictEqual } from 'node:assert'
 
 const root = resolve(import.meta.dirname, '..')
 const sourceRevision = '460d52221c22388b6a9a8e8a44b61dde72976b4e'
@@ -13,18 +14,29 @@ function assert(condition, message) {
 }
 
 function validateRecipe(recipe, expectedGranularity, expectedAlgorithm) {
-  assert(Array.isArray(recipe) && recipe.length >= 2, 'recipe must contain weight and embedding rules')
-  const [weights, embedding] = recipe
-  const weightConfig = weights?.op_config?.weight_tensor_config
-  const embeddingConfig = embedding?.op_config?.weight_tensor_config
-
-  assert(weights?.operation === '*', 'first recipe rule must target all operations')
-  assert(weights?.algorithm_key === expectedAlgorithm, `unexpected recipe algorithm: ${weights?.algorithm_key}`)
-  assert(weightConfig?.num_bits === 4, 'general weights must remain int4')
-  assert(weightConfig?.granularity === expectedGranularity, `expected ${expectedGranularity}`)
-  assert(embedding?.operation === 'EMBEDDING_LOOKUP', 'embedding rule must target EMBEDDING_LOOKUP')
-  assert(embeddingConfig?.num_bits === 8, 'embedding weights must remain int8')
-  assert(embeddingConfig?.granularity === 'CHANNELWISE', 'embedding weights must remain channelwise')
+  // Full structures from the pinned revision, independent of the checked-in JSON.
+  // Object key order/formatting may vary; every option and rule must remain exact.
+  const rule = (operation, algorithm, numBits, granularity) => ({
+    regex: '.*',
+    operation,
+    algorithm_key: algorithm,
+    op_config: {
+      weight_tensor_config: {
+        num_bits: numBits,
+        symmetric: true,
+        granularity,
+        dtype: 'INT',
+      },
+      compute_precision: 'INTEGER',
+      explicit_dequantize: false,
+      skip_checks: false,
+      min_weight_elements: 0,
+    },
+  })
+  deepStrictEqual(recipe, [
+    rule('*', expectedAlgorithm, 4, expectedGranularity),
+    rule('EMBEDDING_LOOKUP', 'min_max_uniform_quantize', 8, 'CHANNELWISE'),
+  ], `pinned recipe contents drifted from ${sourceRevision}`)
 }
 
 const block32 = await readJson('conversion/litert-lm/recipes/int4_block32_octav.json')

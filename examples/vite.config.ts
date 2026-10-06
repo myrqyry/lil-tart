@@ -9,13 +9,15 @@ import {
   QWEN3_TTS_UPSTREAM_REVISION,
 } from '@litert-playground/qwen3-tts/provenance'
 
-const root = path.resolve(__dirname, '..')
+// Example commands use the runner loader to transform public workspace TS imports
+// on Node 22.16, where native type stripping is not enabled by default.
+const root = path.resolve(import.meta.dirname, '..')
 const modelPrefix = '/models/qwen3-tts/'
 const litertWasmPrefix = '/litert-wasm/'
 const litertWasmUpstream = 'https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.3/wasm/'
-const residencyWorkerFile = path.resolve(__dirname, 'minimal-qwen3-tts/residency-worker.js')
-const generatorWorkerFile = path.resolve(__dirname, 'minimal-qwen3-tts/generator-worker.js')
-const decoderWorkerFile = path.resolve(__dirname, 'minimal-qwen3-tts/decoder-worker.js')
+const residencyWorkerFile = path.resolve(import.meta.dirname, 'minimal-qwen3-tts/residency-worker.js')
+const generatorWorkerFile = path.resolve(import.meta.dirname, 'minimal-qwen3-tts/generator-worker.js')
+const decoderWorkerFile = path.resolve(import.meta.dirname, 'minimal-qwen3-tts/decoder-worker.js')
 const workerShells: Record<string, string> = {
   'residency-worker.js': residencyWorkerFile,
   'generator-worker.js': generatorWorkerFile,

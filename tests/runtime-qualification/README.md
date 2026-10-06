@@ -34,6 +34,12 @@ status, observed status, structured error, and `matchesExpectation`. Only
 `browser-observation` results can feed manifest qualification. Files are
 written under `results/` and are ignored by Git except for `.gitkeep`.
 
+When numeric comparison evidence is present, `passed: false` always makes
+`matchesExpectation` false and prevents promotion to a qualified manifest,
+even if inference returned `status: 'pass'`. The original observation and
+comparison remain in the evidence for diagnosis. Cases without numeric
+comparison keep their existing status/error matching rules.
+
 A reproduced known limitation is an observed failure that matches the case
 expectation. If an upstream fix makes a known-limitation case pass, the result
 does not match and the qualification command exits nonzero. This prevents

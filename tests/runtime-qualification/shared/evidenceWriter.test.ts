@@ -12,8 +12,46 @@ import type {
 import { mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { compareNumericOutputs } from './numericParity'
+import { matchQualificationExpectation as matchSchemaExpectation } from '../schema/types'
+
+const failedParity = compareNumericOutputs([1, 2], [1, 5], {
+  referenceLabel: 'reference', candidateLabel: 'candidate', atol: 0, rtol: 0,
+})
 
 describe('qualification evidence', () => {
+  it.each([matchQualificationExpectation, matchSchemaExpectation])(
+    'rejects a passing status with failed numeric parity at either matching entrypoint',
+    (match) => {
+      expect(match({ status: 'pass' }, {
+        status: 'pass', numericComparison: failedParity,
+      })).toBe(false)
+      expect(match({ status: 'pass' }, {
+        status: 'pass', numericComparison: compareNumericOutputs([1, 2], [1, 2], {
+          referenceLabel: 'reference', candidateLabel: 'candidate', atol: 0, rtol: 0,
+        }),
+      })).toBe(true)
+      expect(match({ status: 'known-limitation' }, {
+        status: 'fail', numericComparison: failedParity,
+      })).toBe(false)
+    },
+  )
+
+  it('keeps failed numeric evidence while reporting a qualification mismatch', () => {
+    const result = createQualificationResult({
+      caseId: 'numeric-parity', evidenceKind: 'browser-observation',
+      timestamp: '2026-10-05T00:00:00.000Z', playgroundRevision: 'test',
+      runtimePackage: '@litertjs/core', runtimeVersion: '2.5.3',
+      environment: {
+        runtimePackage: '@litertjs/core', runtimeVersion: '2.5.3', requestedBackend: 'wasm',
+      },
+      expected: { status: 'pass' },
+      observed: { status: 'pass', numericComparison: failedParity },
+    })
+    expect(result.matchesExpectation).toBe(false)
+    expect(result.observed.numericComparison).toEqual(failedParity)
+  })
+
   it('matches a passing observation', () => {
     expect(matchQualificationExpectation(
       { status: 'pass' },

@@ -1,6 +1,22 @@
 <!-- meristem-template:v1 -->
 # Active Work
 
+## Current follow-up — PR #15 merged Verify failure — 2026-10-05
+
+Current source is merged `master` at `1e72863a44fe1a250e55aac7cfcb9f48b2101564`.
+The patch in this checkout repairs a pre-existing Node 22.16 example-config load
+failure and the two unresolved PR #15 correctness findings. Fresh full
+`pnpm verify` exits 0 using Node 22.16.0 and pnpm 11.17.0, including 426
+package/example test executions, 15 boundary tests, 10 compatibility rows,
+15 conversion-validator tests, 73 qualification tests, and all builds.
+The example dev server also serves all three worker shells with exact contents.
+
+This is local verification, not a green hosted CI result. Changes have not been
+committed or pushed; PR #15 review threads remain unresolved remotely. No new
+real-browser model inference or numerical reference observations were recorded.
+Full diagnosis, source links, and verification limits:
+`docs/verification/2026-10-05-pr15-verify-followup.md`.
+
 ## Current follow-up — 2026-09-28, integrated onto `2200684`
 
 This section supersedes the historical working-tree/status notes below. The
