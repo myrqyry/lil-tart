@@ -270,6 +270,7 @@ describe('workspace package boundaries', () => {
     for (const packageName of [
       'inference-core',
       'runtime-litert',
+      'react-litert',
       'browser-cache',
       'text-gen',
       'encoder',

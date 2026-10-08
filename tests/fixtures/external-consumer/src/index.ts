@@ -1,5 +1,6 @@
 import { InferenceError, createHttpAssetResolver } from '@litert-playground/inference-core'
 import { createLiteRtRuntime } from '@litert-playground/runtime-litert'
+import { ManagedLiteRtModelController, useManagedLiteRtModel } from '@litert-playground/react-litert'
 import { createBrowserCacheAssetResolver } from '@litert-playground/browser-cache'
 import {
   LiteRtLmTextPipeline,
@@ -44,6 +45,8 @@ export const importedPackages = [
   InferenceError,
   createHttpAssetResolver,
   createLiteRtRuntime,
+  ManagedLiteRtModelController,
+  useManagedLiteRtModel,
   createBrowserCacheAssetResolver,
   LiteRtLmTextPipeline,
   LiteRtLmWorkerClient,

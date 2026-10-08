@@ -9,6 +9,7 @@ const root = resolve(new URL('..', import.meta.url).pathname)
 const packages = [
   ['inference-core', 'inference-core.tgz'],
   ['runtime-litert', 'runtime-litert.tgz'],
+  ['react-litert', 'react-litert.tgz'],
   ['browser-cache', 'browser-cache.tgz'],
   ['text-gen', 'text-gen.tgz'],
   ['encoder', 'encoder.tgz'],
