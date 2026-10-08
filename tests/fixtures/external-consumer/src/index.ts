@@ -16,6 +16,11 @@ import { KokoroPipeline } from '@litert-playground/kokoro'
 import { Qwen3TtsPipeline } from '@litert-playground/qwen3-tts'
 import { ClipImageEmbeddingPipeline } from '@litert-playground/image-embedding'
 import { MoViNetPipeline } from '@litert-playground/video-classification'
+import {
+  DepthEstimationPipeline,
+  da3SmallPortraitManifest,
+  type DepthFrame,
+} from '@litert-playground/depth-estimation'
 
 // A constructor option whose type is unreachable from the entrypoint is a hole in the
 // supported surface, so the packed consumer has to be able to name it.
@@ -35,6 +40,20 @@ export const multimodalWorkerLoadOptions: LiteRtLmWorkerLoadOptions = {
   engine: 'mediapipe',
   mediaPipe: { maxNumImages: 1, supportAudio: true },
 }
+
+export const depthFrameContract: Pick<
+  DepthFrame,
+  'kind' | 'width' | 'height' | 'sourceToDepthUv' | 'nearFarConvention'
+> = {
+  kind: 'depth',
+  width: 1,
+  height: 1,
+  sourceToDepthUv: { scaleX: 1, scaleY: 1, offsetX: 0, offsetY: 0 },
+  nearFarConvention: 'unknown',
+}
+
+export const depthPipeline = new DepthEstimationPipeline()
+export const depthManifest = da3SmallPortraitManifest
 
 export const multimodalWorkerPrompt: LiteRtLmWorkerPrompt = [
   { type: 'text', text: 'Describe this frame.' },
@@ -58,4 +77,6 @@ export const importedPackages = [
   Qwen3TtsPipeline,
   ClipImageEmbeddingPipeline,
   MoViNetPipeline,
+  DepthEstimationPipeline,
+  da3SmallPortraitManifest,
 ]

@@ -94,6 +94,7 @@ export type InferenceResult =
   | AudioInferenceResult
   | TextInferenceResult
   | ImageInferenceResult
+  | DepthFrame
   | EmbeddingInferenceResult
   | MultiVectorEmbeddingResult
   | TensorInferenceResult
@@ -119,6 +120,45 @@ export interface ImageInferenceResult {
   width: number
   height: number
   pixels: Uint8ClampedArray
+}
+
+export type DepthNearFarConvention = 'higher-near' | 'higher-far' | 'unknown'
+
+/**
+ * Maps normalized source UVs into normalized coordinates in the depth map:
+ * depthUv = sourceUv * scale + offset.
+ */
+export interface DepthUvTransform {
+  scaleX: number
+  scaleY: number
+  offsetX: number
+  offsetY: number
+}
+
+/**
+ * Canonical reusable depth result. Data is row-major Float32 normalized to
+ * [0,1]; the near/far ordering and source/depth coordinate mapping stay
+ * explicit so consumers never have to infer backend-specific conventions.
+ */
+export interface DepthFrame {
+  kind: 'depth'
+  data: Float32Array
+  width: number
+  height: number
+  sourceWidth: number
+  sourceHeight: number
+  sourceToDepthUv: DepthUvTransform
+  frameId?: string | number
+  timestampMs: number
+  nearFarConvention: DepthNearFarConvention
+  normalization: 'frame-minmax'
+  rawRange: {
+    min: number
+    max: number
+  }
+  modelId: string
+  backend: Backend
+  inferenceMs?: number
 }
 
 export interface EmbeddingInferenceResult {

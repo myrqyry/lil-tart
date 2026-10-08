@@ -264,6 +264,34 @@ describe('workspace package boundaries', () => {
     expect(entrypoint).toContain('ClipImageConfig')
   })
 
+  it('keeps depth-estimation externally consumable through the shared runtime contract', async () => {
+    const manifest = JSON.parse(await text('packages/depth-estimation/package.json')) as {
+      dependencies?: Record<string, string>
+      peerDependencies?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
+    const pipeline = await text('packages/depth-estimation/src/pipeline.ts')
+    const entrypoint = await text('packages/depth-estimation/src/index.ts')
+    const coreTypes = await text('packages/inference-core/src/types.ts')
+
+    expect(manifest.dependencies?.['@litertjs/core']).toBeUndefined()
+    expect(manifest.peerDependencies).toMatchObject({
+      '@litert-playground/inference-core': '0.1.x',
+      '@litert-playground/runtime-litert': '0.1.x',
+    })
+    expect(manifest.devDependencies).toMatchObject({
+      '@litert-playground/inference-core': 'workspace:*',
+      '@litert-playground/runtime-litert': 'workspace:*',
+    })
+    expect(pipeline).toContain('ManagedLiteRtRuntime')
+    expect(pipeline).not.toMatch(/\bloadLiteRt\b|\bloadAndCompile\b/)
+    expect(entrypoint).toContain('DepthEstimationPipeline')
+    expect(entrypoint).toContain('da3SmallPortraitManifest')
+    expect(entrypoint).toContain('DepthFrame')
+    expect(coreTypes).toContain('export interface DepthFrame')
+    expect(coreTypes).toContain('sourceToDepthUv')
+  })
+
   it('keeps the packed consumer fixture on the full public inference surface', async () => {
     const consumer = await text('tests/fixtures/external-consumer/src/index.ts')
 
@@ -279,6 +307,7 @@ describe('workspace package boundaries', () => {
       'qwen3-tts',
       'image-embedding',
       'video-classification',
+      'depth-estimation',
     ]) {
       expect(consumer).toContain(`from '@litert-playground/${packageName}'`)
     }

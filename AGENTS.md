@@ -34,6 +34,7 @@ packages/encoder           Text embeddings, token classification
 packages/image-embedding   Image embeddings
 packages/browser-cache     Browser-side model/tensor cache
 packages/video-classification  MoViNet video classification
+packages/depth-estimation    canonical DepthFrame + monocular depth pipelines
 apps/playground            React + Vite + Tailwind model lab (the consumer app)
 ```
 

@@ -1,0 +1,24 @@
+{
+  "name": "@litert-playground/depth-estimation",
+  "version": "0.1.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@litert-playground/inference-core": "0.1.x",
+    "@litert-playground/runtime-litert": "0.1.x"
+  },
+  "devDependencies": {
+    "@litert-playground/inference-core": "workspace:*",
+    "@litert-playground/runtime-litert": "workspace:*",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}

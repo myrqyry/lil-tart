@@ -18,6 +18,7 @@ const packages = [
   ['qwen3-tts', 'qwen3-tts.tgz'],
   ['image-embedding', 'image-embedding.tgz'],
   ['video-classification', 'video-classification.tgz'],
+  ['depth-estimation', 'depth-estimation.tgz'],
 ]
 
 const tempRoot = await mkdtemp(join(tmpdir(), 'lil-tart-compat-'))

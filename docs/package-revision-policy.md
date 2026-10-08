@@ -53,6 +53,7 @@ entrypoint.
 - `@litert-playground/qwen3-tts`
 - `@litert-playground/image-embedding`
 - `@litert-playground/video-classification`
+- `@litert-playground/depth-estimation`
 
 Subpath entrypoints are part of the supported surface on the same terms as the
 `.` entrypoint: a subpath is supported only when the compatibility harness

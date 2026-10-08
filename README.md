@@ -170,6 +170,7 @@ in consuming applications rather than in the shared runtime packages.
 | `packages/encoder` | `@litert-playground/encoder` | Text embeddings and token-classification pipelines |
 | `packages/image-embedding` | `@litert-playground/image-embedding` | Reusable image-embedding package |
 | `packages/video-classification` | `@litert-playground/video-classification` | Browser video-classification support and runtime checks |
+| `packages/depth-estimation` | `@litert-playground/depth-estimation` | Canonical `DepthFrame` contract and reusable monocular-depth pipeline |
 | `examples/minimal-kokoro` | `@litert-playground/example-kokoro` | Minimal standalone Kokoro browser example |
 | `examples/minimal-qwen3-tts` | `@litert-playground/example-qwen3-tts` | Minimal Qwen3-TTS example and compatibility harness |
 
