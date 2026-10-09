@@ -29,9 +29,9 @@ with the same backend selection; callers own input tensors and successful
 result tensors. If a cancelled run eventually returns, orphaned outputs are
 disposed by the adapter.
 
-**Evidence boundary:** the package tests with fake runtimes prove adapter
+**Evidence boundary:** the package tests with controlled runtime test doubles verify adapter
 lifecycles and cancellation invariants; they do not qualify GPU/WebNN/WASM
 inference. For execution proof, use Lil Tart's managed-runtime qualification
 suite and browser/device-specific receipts.
 
-**Validation (2026-10-08):** `pnpm verify` passed on the current checkout, including TypeScript, all package tests, package boundaries, packed external-consumer typecheck/build, conversion assets, runtime qualification, and builds. 8 focused adapter tests passed using a fake `ManagedLiteRtRuntime` with real React server rendering for the SSR case. No browser GPU/WebNN/WASM inference was executed through this adapter. Existing playground `ModelRunner` remains the established consumer and is not replaced by this package.
+**Validation (2026-10-08):** `pnpm verify` passed on the current checkout, including TypeScript, all package tests, package boundaries, packed external-consumer typecheck/build, conversion assets, runtime qualification, and builds. 8 focused adapter tests passed using a controlled `ManagedLiteRtRuntime` test double with real React server rendering for the SSR case. No browser GPU/WebNN/WASM inference was executed through this adapter. Existing playground `ModelRunner` remains the established consumer and is not replaced by this package.
